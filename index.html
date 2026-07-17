@@ -168,6 +168,7 @@
                 }
                 
                 if (type.includes('Academic / Normal')) continue;
+                if (status === 'Cancelled') continue;  // NEW: Exclude Cancelled from attendance
                 
                 if (startStr) {
                     const start = parseFlexibleDate(startStr);
@@ -214,17 +215,17 @@
         }
 
         function displayResults(filename, activities, semStart, semEnd) {
-            const total = activities.length;
+            const total = activities.length;           // only Completed + other non-Cancelled
             const overlaps = activities.filter(checkOverlap).length;
             const attendancePct = total > 0 ? Math.round((overlaps / total) * 100) : 0;
             
             let html = `<h2>${filename}</h2>`;
-            html += `<div class="attendance">📊 Flight Block Attendance (excluding Academic / Normal): <strong>${attendancePct}%</strong><br><small>${overlaps} / ${total} qualifying activities</small></div>`;
+            html += `<div class="attendance">📊 Flight Block Attendance<br>(excluding Academic / Normal and Cancelled): <strong>${attendancePct}%</strong><br><small>${overlaps} / ${total} qualifying activities</small></div>`;
             
             if (semStart || semEnd) html += `<p class="summary">Date range: ${semStart ? semStart.toLocaleDateString() : ''} – ${semEnd ? semEnd.toLocaleDateString() : ''}</p>`;
             
             if (total === 0) {
-                html += `<p>No qualifying flight activities found.</p>`;
+                html += `<p>No qualifying (non-cancelled, non-academic) activities found.</p>`;
             } else {
                 html += `<table><thead><tr><th>Date</th><th>Description</th><th>Start (MT)</th><th>End (MT)</th><th>Status</th><th>In Block?</th></tr></thead><tbody>`;
                 activities.forEach(act => {
