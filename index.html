@@ -19,7 +19,7 @@
         .block-item { padding: 8px; margin: 5px 0; background: #f0f0f0; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; }
         #status { margin: 10px 0; color: #d32f2f; }
         .summary { font-weight: bold; margin: 15px 0; font-size: 1.1em; }
-        .attendance { font-size: 1.3em; color: #0066cc; margin: 20px 0; }
+        .attendance { font-size: 1.4em; color: #0066cc; margin: 20px 0; padding: 15px; background: white; border: 2px solid #0066cc; border-radius: 8px; text-align: center; }
     </style>
 </head>
 <body>
@@ -114,7 +114,7 @@
             if (semesterEnd) semesterEnd.setHours(23,59,59,999);
 
             document.getElementById('results').innerHTML = '';
-            document.getElementById('status').innerHTML = 'Processing StudentSchedule.csv...';
+            document.getElementById('status').innerHTML = 'Processing...';
 
             Array.from(files).forEach(file => {
                 const reader = new FileReader();
@@ -130,39 +130,42 @@
             });
         }
 
-        // Specialized parser for this exact CSV format
         function parseStudentScheduleCSV(csvText, semesterStart, semesterEnd) {
             const lines = csvText.trim().split('\n');
             const activities = [];
             
             for (let line of lines) {
-                if (!line.includes('Activity Start') && !line.includes('2026')) continue;
+                if (!line.includes('2026')) continue;
                 
-                // Split by comma, handling quotes roughly
                 const fields = line.split('","').map(f => f.replace(/^"|"$/g, '').trim());
                 
-                // Look for date patterns like "DD MMM YYYY HH:MM"
-                let startStr = null, endStr = null;
-                for (let i = 0; i < fields.length; i++) {
-                    if (/\d{2} \w{3} 2026 \d{2}:\d{2}/.test(fields[i])) {
-                        if (!startStr) startStr = fields[i];
-                        else if (!endStr) endStr = fields[i];
+                let startStr = null, endStr = null, type = '', status = '';
+                
+                for (let f of fields) {
+                    if (/\d{2} \w{3} 2026 \d{2}:\d{2}/.test(f)) {
+                        if (!startStr) startStr = f;
+                        else if (!endStr) endStr = f;
                     }
+                    if (f.includes('/ Normal') || f.includes('Academic') || f.includes('Oral') || f.includes('Flight')) {
+                        type = f;
+                    }
+                    if (['Completed','Cancelled'].includes(f)) status = f;
                 }
+                
+                // Ignore Academic / Normal
+                if (type.includes('Academic / Normal')) continue;
                 
                 if (startStr) {
                     const start = parseFlexibleDate(startStr);
                     const end = endStr ? parseFlexibleDate(endStr) : null;
                     
                     if (start && (!semesterStart || start >= semesterStart) && (!semesterEnd || start <= semesterEnd)) {
-                        // Find description (often near "Activity Type")
-                        let desc = fields.find(f => f.includes('/')) || 'Activity';
                         activities.push({
                             id: start.toLocaleDateString(),
-                            description: desc.substring(0, 100),
+                            description: type || 'Flight Activity',
                             start: start,
                             end: end,
-                            status: fields.find(f => ['Completed','Cancelled'].includes(f)) || 'Unknown'
+                            status: status || 'Unknown'
                         });
                     }
                 }
@@ -172,10 +175,8 @@
 
         function parseFlexibleDate(str) {
             if (!str) return null;
-            // Handle format like "07 Jan 2026 11:40"
-            const cleaned = str.replace(/(\d{2} \w{3} 2026 \d{2}:\d{2})/, '$1');
-            let date = new Date(cleaned);
-            if (isNaN(date.getTime())) date = new Date(str);
+            let date = new Date(str);
+            if (isNaN(date.getTime())) date = new Date(str.replace(/(\d{2} \w{3} 2026)/, '$1'));
             return !isNaN(date.getTime()) ? date : null;
         }
 
@@ -205,24 +206,21 @@
             const attendancePct = total > 0 ? Math.round((overlaps / total) * 100) : 0;
             
             let html = `<h2>${filename}</h2>`;
-            html += `<div class="attendance">📊 Attendance in Flight Blocks: <strong>${attendancePct}%</strong> (${overlaps} / ${total} activities)</div>`;
+            html += `<div class="attendance">📊 Flight Block Attendance (excluding Academic / Normal): <strong>${attendancePct}%</strong><br><small>${overlaps} / ${total} qualifying activities</small></div>`;
             
-            if (semStart || semEnd) {
-                html += `<p class="summary">Filtered: ${semStart ? semStart.toLocaleDateString() : ''} — ${semEnd ? semEnd.toLocaleDateString() : ''}</p>`;
-            }
+            if (semStart || semEnd) html += `<p class="summary">Date range: ${semStart ? semStart.toLocaleDateString() : ''} – ${semEnd ? semEnd.toLocaleDateString() : ''}</p>`;
             
             if (total === 0) {
-                html += `<p>No activities parsed. The file was processed with a custom parser for this schedule format.</p>`;
+                html += `<p>No qualifying flight activities found after filtering out Academic / Normal entries.</p>`;
             } else {
                 html += `<table><thead><tr><th>Date</th><th>Description</th><th>Start (MT)</th><th>End (MT)</th><th>Status</th><th>In Block?</th></tr></thead><tbody>`;
-                
                 activities.forEach(act => {
                     const overlaps = checkOverlap(act);
                     html += `<tr class="${overlaps ? 'overlap' : 'no-overlap'}">
                         <td>${act.start.toLocaleDateString()}</td>
                         <td>${act.description}</td>
-                        <td>${act.start.toLocaleTimeString('en-US', {timeZone: 'America/Denver', hour:'2-digit', minute:'2-digit'})}</td>
-                        <td>${act.end ? act.end.toLocaleTimeString('en-US', {timeZone: 'America/Denver', hour:'2-digit', minute:'2-digit'}) : '—'}</td>
+                        <td>${act.start.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', timeZone: 'America/Denver'})}</td>
+                        <td>${act.end ? act.end.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', timeZone: 'America/Denver'}) : '—'}</td>
                         <td>${act.status}</td>
                         <td>${overlaps ? '✅ YES' : 'No'}</td>
                     </tr>`;
