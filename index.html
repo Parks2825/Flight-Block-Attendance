@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Flight Block Comparator</title>
+    <title>Flight Block Comparator - CSV</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; background: #f9f9f9; }
         h1, h2 { color: #333; }
@@ -14,16 +14,20 @@
         .no-overlap { background-color: #ddffdd !important; }
         .controls { margin: 20px 0; padding: 15px; background: white; border: 1px solid #ddd; border-radius: 6px; }
         button { margin-right: 10px; padding: 8px 16px; }
+        input[type="date"] { margin: 0 5px; padding: 5px; }
         #status { margin: 10px 0; color: #d32f2f; }
-        pre { background: #f4f4f4; padding: 10px; white-space: pre-wrap; max-height: 300px; overflow: auto; }
+        .summary { font-weight: bold; margin: 15px 0; color: #444; }
     </style>
 </head>
 <body>
-    <h1>Flight Block Comparator</h1>
+    <h1>Flight Block Comparator (CSV)</h1>
     <p><strong>Flight Block:</strong> Monday, Wednesday, Friday • 08:30 – 11:00 Mountain Time (America/Denver)</p>
     
     <div class="controls">
-        <input type="file" id="xmlFile" accept=".xml" multiple>
+        <label>Semester Start: <input type="date" id="semesterStart"></label>
+        <label>Semester End: <input type="date" id="semesterEnd"></label><br><br>
+        
+        <input type="file" id="csvFile" accept=".csv" multiple>
         <button onclick="processFiles()">Load and Compare</button>
         <button onclick="clearResults()">Clear Results</button>
     </div>
@@ -38,8 +42,15 @@
         const TIMEZONE = 'America/Denver';
 
         function processFiles() {
-            const files = document.getElementById('xmlFile').files;
-            if (files.length === 0) return alert('Select at least one XML file');
+            const files = document.getElementById('csvFile').files;
+            const startStr = document.getElementById('semesterStart').value;
+            const endStr = document.getElementById('semesterEnd').value;
+            
+            if (files.length === 0) return alert('Please select one or more CSV files');
+            
+            const semesterStart = startStr ? new Date(startStr) : null;
+            let semesterEnd = endStr ? new Date(endStr) : null;
+            if (semesterEnd) semesterEnd.setHours(23, 59, 59, 999);
             
             document.getElementById('results').innerHTML = '';
             document.getElementById('status').innerHTML = 'Processing...';
@@ -48,73 +59,74 @@
                 const reader = new FileReader();
                 reader.onload = e => {
                     try {
-                        const xmlDoc = new DOMParser().parseFromString(e.target.result, "text/xml");
-                        const activities = parseActivities(xmlDoc);
-                        displayResults(file.name, activities);
+                        const activities = parseCSV(e.target.result, semesterStart, semesterEnd);
+                        displayResults(file.name, activities, semesterStart, semesterEnd);
                     } catch (err) {
-                        document.getElementById('status').innerHTML += `<p>Error with ${file.name}: ${err.message}</p>`;
+                        document.getElementById('status').innerHTML += `<p>Error in ${file.name}: ${err.message}</p>`;
                     }
                 };
                 reader.readAsText(file);
             });
         }
 
-        function parseActivities(xmlDoc) {
+        function parseCSV(csvText, semesterStart, semesterEnd) {
+            const lines = csvText.trim().split('\n');
+            if (lines.length < 1) return [];
+            
+            const headers = lines[0].toLowerCase().split(',').map(h => h.trim().replace(/"/g, ''));
             const activities = [];
-            const tags = ['activity','event','flight','schedule','entry','log','item','record'];
-            let items = [];
             
-            for (let tag of tags) {
-                items = xmlDoc.getElementsByTagName(tag);
-                if (items.length > 0) break;
-            }
-
-            const processElement = (el, idx) => {
-                const startStr = getTimeValue(el, ['start','startTime','begin','time','date','datetime','from']);
-                const endStr = getTimeValue(el, ['end','endTime','finish','to']);
-                const desc = el.getAttribute('name') || el.getAttribute('title') || el.getAttribute('id') || el.textContent.trim().substring(0,80) || `Activity ${idx+1}`;
+            for (let i = 1; i < lines.length; i++) {
+                if (!lines[i].trim()) continue;
+                const values = parseCSVLine(lines[i]);
+                const row = {};
+                headers.forEach((h, idx) => row[h] = (values[idx] || '').trim().replace(/^"|"$/g, ''));
                 
-                if (startStr) {
-                    const start = parseFlexibleDate(startStr);
-                    if (start) {
-                        activities.push({
-                            id: el.getAttribute('id') || `act-${idx}`,
-                            description: desc,
-                            start: start,
-                            end: endStr ? parseFlexibleDate(endStr) : null
-                        });
-                    }
+                const startStr = row['start'] || row['starttime'] || row['start_time'] || row['begin'] || row['time'] || row['date'] || row['datetime'] || row['timestamp'];
+                const endStr = row['end'] || row['endtime'] || row['end_time'] || row['finish'] || row['to'];
+                const desc = row['description'] || row['name'] || row['title'] || row['activity'] || row['event'] || row['type'] || 'Activity';
+                
+                if (!startStr) continue;
+                
+                const start = parseFlexibleDate(startStr);
+                const end = endStr ? parseFlexibleDate(endStr) : null;
+                
+                if (start && 
+                    (!semesterStart || start >= semesterStart) && 
+                    (!semesterEnd || start <= semesterEnd)) {
+                    activities.push({
+                        id: row['id'] || row['activityid'] || row['number'] || `row-${i}`,
+                        description: desc.substring(0, 120),
+                        start: start,
+                        end: end
+                    });
                 }
-            };
-
-            if (items.length > 0) {
-                Array.from(items).forEach((item, i) => processElement(item, i));
-            } else {
-                // Fallback: scan all elements
-                Array.from(xmlDoc.getElementsByTagName('*')).forEach((el, i) => processElement(el, i));
             }
-            
-            return activities.filter(a => a.start);
+            return activities;
         }
 
-        function getTimeValue(el, keys) {
-            for (let key of keys) {
-                let val = el.getAttribute(key);
-                if (!val) {
-                    const child = el.querySelector(key) || el.querySelector(`[name="${key}"]`);
-                    if (child) val = child.textContent.trim();
+        function parseCSVLine(line) {
+            const result = [];
+            let current = '';
+            let inQuotes = false;
+            for (let char of line) {
+                if (char === '"') inQuotes = !inQuotes;
+                else if (char === ',' && !inQuotes) {
+                    result.push(current);
+                    current = '';
+                } else {
+                    current += char;
                 }
-                if (val) return val;
             }
-            return null;
+            result.push(current);
+            return result;
         }
 
         function parseFlexibleDate(str) {
+            if (!str) return null;
             let date = new Date(str);
             if (!isNaN(date.getTime())) return date;
-            
-            // Try common variations
-            const cleaned = str.replace(/([+-]\d{2}:?\d{2}|Z)$/,'');
+            const cleaned = str.replace(/([+-]\d{2}:?\d{2}|Z)$/,'').trim();
             date = new Date(cleaned);
             return !isNaN(date.getTime()) ? date : null;
         }
@@ -122,48 +134,44 @@
         function isInFlightBlock(date) {
             if (!date) return false;
             const mt = new Date(date.toLocaleString("en-US", {timeZone: TIMEZONE}));
-            const day = mt.getDay();
-            if (!FLIGHT_DAYS.includes(day)) return false;
-            
+            if (!FLIGHT_DAYS.includes(mt.getDay())) return false;
             const mins = mt.getHours() * 60 + mt.getMinutes();
             const blockStart = FLIGHT_START_HOUR * 60 + FLIGHT_START_MIN;
             const blockEnd = FLIGHT_END_HOUR * 60 + FLIGHT_END_MIN;
-            
             return mins >= blockStart && mins < blockEnd;
         }
 
         function checkOverlap(act) {
             if (!act.start) return false;
-            if (isInFlightBlock(act.start)) return true;
-            if (act.end && isInFlightBlock(act.end)) return true;
-            return false; // Basic overlap; extendable for full interval check
+            return isInFlightBlock(act.start) || (act.end && isInFlightBlock(act.end));
         }
 
-        function displayResults(filename, activities) {
-            let html = `<h2>${filename} — ${activities.length} activities found</h2>`;
+        function displayResults(filename, activities, semStart, semEnd) {
+            let html = `<h2>${filename} — ${activities.length} activities</h2>`;
+            if (semStart || semEnd) {
+                html += `<p class="summary">Date range: ${semStart ? semStart.toLocaleDateString() : '—'} to ${semEnd ? semEnd.toLocaleDateString() : '—'}</p>`;
+            }
             
             if (activities.length === 0) {
-                html += `<p>No timed activities detected. The XML parser is flexible but your file may need custom adjustments (contact me for tweaks).</p>`;
-                document.getElementById('results').innerHTML += html;
-                return;
+                html += `<p>No matching activities found in the selected date range.</p>`;
+            } else {
+                html += `<table><thead><tr><th>ID</th><th>Description</th><th>Start (MT)</th><th>End (MT)</th><th>Flight Block Overlap?</th></tr></thead><tbody>`;
+                let overlapCount = 0;
+                
+                activities.forEach(act => {
+                    const overlaps = checkOverlap(act);
+                    if (overlaps) overlapCount++;
+                    html += `<tr class="${overlaps ? 'overlap' : 'no-overlap'}">
+                        <td>${act.id}</td>
+                        <td>${act.description}</td>
+                        <td>${act.start.toLocaleString('en-US', {timeZone: TIMEZONE, timeZoneName: 'short'})}</td>
+                        <td>${act.end ? act.end.toLocaleString('en-US', {timeZone: TIMEZONE, timeZoneName: 'short'}) : '—'}</td>
+                        <td>${overlaps ? '✅ YES (Conflict)' : 'No'}</td>
+                    </tr>`;
+                });
+                html += `</tbody></table><p class="summary">Total overlaps with Flight Block: ${overlapCount} / ${activities.length}</p>`;
             }
-
-            html += `<table><thead><tr><th>ID</th><th>Description</th><th>Start (MT)</th><th>End (MT)</th><th>Block Overlap?</th></tr></thead><tbody>`;
-            
-            activities.forEach(act => {
-                const startStr = act.start.toLocaleString('en-US', {timeZone: TIMEZONE, timeZoneName: 'short'});
-                const endStr = act.end ? act.end.toLocaleString('en-US', {timeZone: TIMEZONE, timeZoneName: 'short'}) : '—';
-                const overlaps = checkOverlap(act);
-                html += `<tr class="${overlaps ? 'overlap' : 'no-overlap'}">
-                    <td>${act.id}</td>
-                    <td>${act.description}</td>
-                    <td>${startStr}</td>
-                    <td>${endStr}</td>
-                    <td>${overlaps ? '✅ YES (Conflict)' : 'No'}</td>
-                </tr>`;
-            });
-            
-            html += `</tbody></table><hr>`;
+            html += `<hr>`;
             document.getElementById('results').innerHTML += html;
             document.getElementById('status').innerHTML = '';
         }
@@ -172,6 +180,14 @@
             document.getElementById('results').innerHTML = '';
             document.getElementById('status').innerHTML = '';
         }
+
+        // Default semester dates
+        window.onload = () => {
+            const start = document.getElementById('semesterStart');
+            const end = document.getElementById('semesterEnd');
+            if (!start.value) start.value = '2026-01-01';
+            if (!end.value) end.value = '2026-05-31';
+        };
     </script>
 </body>
 </html>
