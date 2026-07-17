@@ -15,6 +15,8 @@
         .controls, .block-manager { margin: 20px 0; padding: 15px; background: white; border: 1px solid #ddd; border-radius: 6px; }
         button { margin: 5px; padding: 8px 16px; }
         input[type="date"], input[type="time"], input[type="text"] { padding: 6px; }
+        .checkbox-group { display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0; }
+        .checkbox-group label { display: flex; align-items: center; gap: 4px; }
         .block-list { margin-top: 10px; }
         .block-item { padding: 10px; margin: 6px 0; background: #f0f0f0; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; }
         #status { margin: 10px 0; color: #d32f2f; }
@@ -31,22 +33,21 @@
         <div>
             <label>Block Name: <input type="text" id="blockName" placeholder="e.g. Morning Block" value="Morning Block"></label><br><br>
             
-            <label>Day(s): 
-                <select id="blockDays" multiple size="5">
-                    <option value="1" selected>Monday</option>
-                    <option value="3" selected>Wednesday</option>
-                    <option value="5" selected>Friday</option>
-                    <option value="2">Tuesday</option>
-                    <option value="4">Thursday</option>
-                    <option value="6">Saturday</option>
-                    <option value="0">Sunday</option>
-                </select>
-            </label><br><br>
+            <strong>Day(s):</strong>
+            <div class="checkbox-group">
+                <label><input type="checkbox" value="1" checked> Monday</label>
+                <label><input type="checkbox" value="2"> Tuesday</label>
+                <label><input type="checkbox" value="3" checked> Wednesday</label>
+                <label><input type="checkbox" value="4"> Thursday</label>
+                <label><input type="checkbox" value="5" checked> Friday</label>
+                <label><input type="checkbox" value="6"> Saturday</label>
+                <label><input type="checkbox" value="0"> Sunday</label>
+            </div><br>
             
             <label>Start Time: <input type="time" id="blockStart" value="08:30"></label>
             <label>End Time: <input type="time" id="blockEnd" value="11:00"></label><br><br>
             
-            <button onclick="addFlightBlock()">Add / Update Block</button>
+            <button onclick="addFlightBlock()">Add Flight Block</button>
         </div>
         
         <div class="block-list" id="blockList"></div>
@@ -88,13 +89,17 @@
 
         function addFlightBlock() {
             const name = document.getElementById('blockName').value.trim() || `Block ${flightBlocks.length + 1}`;
-            const daysSelect = document.getElementById('blockDays');
-            const selectedDays = Array.from(daysSelect.selectedOptions).map(opt => parseInt(opt.value));
+            
+            const checkboxes = document.querySelectorAll('.checkbox-group input[type="checkbox"]');
+            const selectedDays = Array.from(checkboxes)
+                .filter(cb => cb.checked)
+                .map(cb => parseInt(cb.value));
+            
             const start = document.getElementById('blockStart').value;
             const end = document.getElementById('blockEnd').value;
             
             if (selectedDays.length === 0 || !start || !end) {
-                return alert('Please select day(s) and set times');
+                return alert('Please select at least one day and set times');
             }
             
             flightBlocks.push({
@@ -106,7 +111,6 @@
             });
             
             renderFlightBlocks();
-            // Clear name field for next entry
             document.getElementById('blockName').value = '';
         }
 
@@ -159,13 +163,10 @@
                         if (!startStr) startStr = f;
                         else if (!endStr) endStr = f;
                     }
-                    if (f.includes('Academic') || f.includes('Oral') || f.includes('Flight') || f.includes('Check')) {
-                        type = f;
-                    }
+                    if (f.includes('Academic') || f.includes('Oral') || f.includes('Flight') || f.includes('Check')) type = f;
                     if (['Completed','Cancelled'].includes(f)) status = f;
                 }
                 
-                // Ignore Academic / Normal
                 if (type.includes('Academic / Normal')) continue;
                 
                 if (startStr) {
