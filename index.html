@@ -3,177 +3,235 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Flight Block Comparator - CSV</title>
+    <title>Flight Block Comparator</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; background: #f9f9f9; }
         h1, h2 { color: #333; }
-        table { border-collapse: collapse; width: 100%; margin-top: 20px; background: white; }
+        table { border-collapse: collapse; width: 100%; margin: 20px 0; background: white; }
         th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
         th { background-color: #f2f2f2; }
         .overlap { background-color: #ffdddd !important; font-weight: bold; }
         .no-overlap { background-color: #ddffdd !important; }
-        .controls { margin: 20px 0; padding: 15px; background: white; border: 1px solid #ddd; border-radius: 6px; }
-        button { margin-right: 10px; padding: 8px 16px; }
-        input[type="date"] { margin: 0 5px; padding: 5px; }
+        .controls, .block-manager { margin: 20px 0; padding: 15px; background: white; border: 1px solid #ddd; border-radius: 6px; }
+        button { margin: 5px; padding: 8px 16px; }
+        input[type="date"], input[type="time"] { padding: 5px; }
+        .block-list { margin-top: 10px; }
+        .block-item { padding: 8px; margin: 5px 0; background: #f0f0f0; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; }
         #status { margin: 10px 0; color: #d32f2f; }
-        .summary { font-weight: bold; margin: 15px 0; color: #444; }
+        .summary { font-weight: bold; margin: 15px 0; font-size: 1.1em; }
+        .attendance { font-size: 1.3em; color: #0066cc; margin: 20px 0; }
     </style>
 </head>
 <body>
-    <h1>Flight Block Comparator (CSV)</h1>
-    <p><strong>Flight Block:</strong> Monday, Wednesday, Friday • 08:30 – 11:00 Mountain Time (America/Denver)</p>
-    
+    <h1>Flight Block Comparator</h1>
+
+    <!-- Flight Block Manager -->
+    <div class="block-manager">
+        <h2>Flight Block Manager</h2>
+        <div>
+            <label>Day(s): 
+                <select id="blockDays" multiple size="4">
+                    <option value="1" selected>Monday</option>
+                    <option value="3" selected>Wednesday</option>
+                    <option value="5" selected>Friday</option>
+                    <option value="2">Tuesday</option>
+                    <option value="4">Thursday</option>
+                    <option value="6">Saturday</option>
+                    <option value="0">Sunday</option>
+                </select>
+            </label><br><br>
+            <label>Start Time: <input type="time" id="blockStart" value="08:30"></label>
+            <label>End Time: <input type="time" id="blockEnd" value="11:00"></label><br><br>
+            <button onclick="addFlightBlock()">Add Flight Block</button>
+        </div>
+        <div class="block-list" id="blockList"></div>
+    </div>
+
+    <!-- Main Controls -->
     <div class="controls">
         <label>Semester Start: <input type="date" id="semesterStart"></label>
         <label>Semester End: <input type="date" id="semesterEnd"></label><br><br>
         
         <input type="file" id="csvFile" accept=".csv" multiple>
-        <button onclick="processFiles()">Load and Compare</button>
-        <button onclick="clearResults()">Clear Results</button>
+        <button onclick="processFiles()">Load CSV & Compare</button>
+        <button onclick="clearResults()">Clear</button>
     </div>
     
     <div id="status"></div>
     <div id="results"></div>
 
     <script>
-        const FLIGHT_DAYS = [1, 3, 5]; // Mon=1, Wed=3, Fri=5
-        const FLIGHT_START_HOUR = 8, FLIGHT_START_MIN = 30;
-        const FLIGHT_END_HOUR = 11, FLIGHT_END_MIN = 0;
-        const TIMEZONE = 'America/Denver';
+        let flightBlocks = [
+            { id: 1, days: [1,3,5], start: "08:30", end: "11:00", name: "Mon/Wed/Fri Morning" }
+        ];
+
+        function renderFlightBlocks() {
+            const container = document.getElementById('blockList');
+            container.innerHTML = '<strong>Active Flight Blocks:</strong><br>';
+            flightBlocks.forEach((block, index) => {
+                const dayNames = block.days.map(d => ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d]).join(', ');
+                const div = document.createElement('div');
+                div.className = 'block-item';
+                div.innerHTML = `
+                    <span><strong>${block.name}</strong>: ${dayNames} ${block.start}–${block.end}</span>
+                    <button onclick="removeFlightBlock(${index})" style="background:#ff4444;color:white;">Remove</button>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        function addFlightBlock() {
+            const daysSelect = document.getElementById('blockDays');
+            const selectedDays = Array.from(daysSelect.selectedOptions).map(opt => parseInt(opt.value));
+            const start = document.getElementById('blockStart').value;
+            const end = document.getElementById('blockEnd').value;
+            if (selectedDays.length === 0 || !start || !end) return alert('Select day(s) and times');
+            
+            flightBlocks.push({
+                id: Date.now(),
+                days: selectedDays,
+                start: start,
+                end: end,
+                name: `Custom Block ${flightBlocks.length + 1}`
+            });
+            renderFlightBlocks();
+        }
+
+        function removeFlightBlock(index) {
+            if (confirm('Remove this block?')) {
+                flightBlocks.splice(index, 1);
+                renderFlightBlocks();
+            }
+        }
 
         function processFiles() {
             const files = document.getElementById('csvFile').files;
-            const startStr = document.getElementById('semesterStart').value;
-            const endStr = document.getElementById('semesterEnd').value;
-            
-            if (files.length === 0) return alert('Please select one or more CSV files');
-            
-            const semesterStart = startStr ? new Date(startStr) : null;
-            let semesterEnd = endStr ? new Date(endStr) : null;
-            if (semesterEnd) semesterEnd.setHours(23, 59, 59, 999);
-            
+            if (files.length === 0) return alert('Select CSV file(s)');
+            if (flightBlocks.length === 0) return alert('Add at least one flight block');
+
+            const semesterStart = document.getElementById('semesterStart').value ? new Date(document.getElementById('semesterStart').value) : null;
+            let semesterEnd = document.getElementById('semesterEnd').value ? new Date(document.getElementById('semesterEnd').value) : null;
+            if (semesterEnd) semesterEnd.setHours(23,59,59,999);
+
             document.getElementById('results').innerHTML = '';
-            document.getElementById('status').innerHTML = 'Processing...';
-            
+            document.getElementById('status').innerHTML = 'Processing StudentSchedule.csv...';
+
             Array.from(files).forEach(file => {
                 const reader = new FileReader();
                 reader.onload = e => {
                     try {
-                        const activities = parseCSV(e.target.result, semesterStart, semesterEnd);
+                        const activities = parseStudentScheduleCSV(e.target.result, semesterStart, semesterEnd);
                         displayResults(file.name, activities, semesterStart, semesterEnd);
                     } catch (err) {
-                        document.getElementById('status').innerHTML += `<p>Error in ${file.name}: ${err.message}</p>`;
+                        document.getElementById('status').innerHTML += `<p>Error: ${err.message}</p>`;
                     }
                 };
                 reader.readAsText(file);
             });
         }
 
-        function parseCSV(csvText, semesterStart, semesterEnd) {
+        // Specialized parser for this exact CSV format
+        function parseStudentScheduleCSV(csvText, semesterStart, semesterEnd) {
             const lines = csvText.trim().split('\n');
-            if (lines.length < 1) return [];
-            
-            const headers = lines[0].toLowerCase().split(',').map(h => h.trim().replace(/"/g, ''));
             const activities = [];
             
-            for (let i = 1; i < lines.length; i++) {
-                if (!lines[i].trim()) continue;
-                const values = parseCSVLine(lines[i]);
-                const row = {};
-                headers.forEach((h, idx) => row[h] = (values[idx] || '').trim().replace(/^"|"$/g, ''));
+            for (let line of lines) {
+                if (!line.includes('Activity Start') && !line.includes('2026')) continue;
                 
-                const startStr = row['start'] || row['starttime'] || row['start_time'] || row['begin'] || row['time'] || row['date'] || row['datetime'] || row['timestamp'];
-                const endStr = row['end'] || row['endtime'] || row['end_time'] || row['finish'] || row['to'];
-                const desc = row['description'] || row['name'] || row['title'] || row['activity'] || row['event'] || row['type'] || 'Activity';
+                // Split by comma, handling quotes roughly
+                const fields = line.split('","').map(f => f.replace(/^"|"$/g, '').trim());
                 
-                if (!startStr) continue;
+                // Look for date patterns like "DD MMM YYYY HH:MM"
+                let startStr = null, endStr = null;
+                for (let i = 0; i < fields.length; i++) {
+                    if (/\d{2} \w{3} 2026 \d{2}:\d{2}/.test(fields[i])) {
+                        if (!startStr) startStr = fields[i];
+                        else if (!endStr) endStr = fields[i];
+                    }
+                }
                 
-                const start = parseFlexibleDate(startStr);
-                const end = endStr ? parseFlexibleDate(endStr) : null;
-                
-                if (start && 
-                    (!semesterStart || start >= semesterStart) && 
-                    (!semesterEnd || start <= semesterEnd)) {
-                    activities.push({
-                        id: row['id'] || row['activityid'] || row['number'] || `row-${i}`,
-                        description: desc.substring(0, 120),
-                        start: start,
-                        end: end
-                    });
+                if (startStr) {
+                    const start = parseFlexibleDate(startStr);
+                    const end = endStr ? parseFlexibleDate(endStr) : null;
+                    
+                    if (start && (!semesterStart || start >= semesterStart) && (!semesterEnd || start <= semesterEnd)) {
+                        // Find description (often near "Activity Type")
+                        let desc = fields.find(f => f.includes('/')) || 'Activity';
+                        activities.push({
+                            id: start.toLocaleDateString(),
+                            description: desc.substring(0, 100),
+                            start: start,
+                            end: end,
+                            status: fields.find(f => ['Completed','Cancelled'].includes(f)) || 'Unknown'
+                        });
+                    }
                 }
             }
             return activities;
         }
 
-        function parseCSVLine(line) {
-            const result = [];
-            let current = '';
-            let inQuotes = false;
-            for (let char of line) {
-                if (char === '"') inQuotes = !inQuotes;
-                else if (char === ',' && !inQuotes) {
-                    result.push(current);
-                    current = '';
-                } else {
-                    current += char;
-                }
-            }
-            result.push(current);
-            return result;
-        }
-
         function parseFlexibleDate(str) {
             if (!str) return null;
-            let date = new Date(str);
-            if (!isNaN(date.getTime())) return date;
-            const cleaned = str.replace(/([+-]\d{2}:?\d{2}|Z)$/,'').trim();
-            date = new Date(cleaned);
+            // Handle format like "07 Jan 2026 11:40"
+            const cleaned = str.replace(/(\d{2} \w{3} 2026 \d{2}:\d{2})/, '$1');
+            let date = new Date(cleaned);
+            if (isNaN(date.getTime())) date = new Date(str);
             return !isNaN(date.getTime()) ? date : null;
         }
 
-        function isInFlightBlock(date) {
+        function isInAnyFlightBlock(date) {
             if (!date) return false;
-            const mt = new Date(date.toLocaleString("en-US", {timeZone: TIMEZONE}));
-            if (!FLIGHT_DAYS.includes(mt.getDay())) return false;
+            const mt = new Date(date.toLocaleString("en-US", {timeZone: 'America/Denver'}));
+            const day = mt.getDay();
             const mins = mt.getHours() * 60 + mt.getMinutes();
-            const blockStart = FLIGHT_START_HOUR * 60 + FLIGHT_START_MIN;
-            const blockEnd = FLIGHT_END_HOUR * 60 + FLIGHT_END_MIN;
-            return mins >= blockStart && mins < blockEnd;
+            
+            for (let block of flightBlocks) {
+                if (block.days.includes(day)) {
+                    const [sh, sm] = block.start.split(':').map(Number);
+                    const [eh, em] = block.end.split(':').map(Number);
+                    if (mins >= (sh*60 + sm) && mins < (eh*60 + em)) return true;
+                }
+            }
+            return false;
         }
 
         function checkOverlap(act) {
-            if (!act.start) return false;
-            return isInFlightBlock(act.start) || (act.end && isInFlightBlock(act.end));
+            return act.start && (isInAnyFlightBlock(act.start) || (act.end && isInAnyFlightBlock(act.end)));
         }
 
         function displayResults(filename, activities, semStart, semEnd) {
-            let html = `<h2>${filename} — ${activities.length} activities</h2>`;
+            const total = activities.length;
+            const overlaps = activities.filter(checkOverlap).length;
+            const attendancePct = total > 0 ? Math.round((overlaps / total) * 100) : 0;
+            
+            let html = `<h2>${filename}</h2>`;
+            html += `<div class="attendance">📊 Attendance in Flight Blocks: <strong>${attendancePct}%</strong> (${overlaps} / ${total} activities)</div>`;
+            
             if (semStart || semEnd) {
-                html += `<p class="summary">Date range: ${semStart ? semStart.toLocaleDateString() : '—'} to ${semEnd ? semEnd.toLocaleDateString() : '—'}</p>`;
+                html += `<p class="summary">Filtered: ${semStart ? semStart.toLocaleDateString() : ''} — ${semEnd ? semEnd.toLocaleDateString() : ''}</p>`;
             }
             
-            if (activities.length === 0) {
-                html += `<p>No matching activities found in the selected date range.</p>`;
+            if (total === 0) {
+                html += `<p>No activities parsed. The file was processed with a custom parser for this schedule format.</p>`;
             } else {
-                html += `<table><thead><tr><th>ID</th><th>Description</th><th>Start (MT)</th><th>End (MT)</th><th>Flight Block Overlap?</th></tr></thead><tbody>`;
-                let overlapCount = 0;
+                html += `<table><thead><tr><th>Date</th><th>Description</th><th>Start (MT)</th><th>End (MT)</th><th>Status</th><th>In Block?</th></tr></thead><tbody>`;
                 
                 activities.forEach(act => {
                     const overlaps = checkOverlap(act);
-                    if (overlaps) overlapCount++;
                     html += `<tr class="${overlaps ? 'overlap' : 'no-overlap'}">
-                        <td>${act.id}</td>
+                        <td>${act.start.toLocaleDateString()}</td>
                         <td>${act.description}</td>
-                        <td>${act.start.toLocaleString('en-US', {timeZone: TIMEZONE, timeZoneName: 'short'})}</td>
-                        <td>${act.end ? act.end.toLocaleString('en-US', {timeZone: TIMEZONE, timeZoneName: 'short'}) : '—'}</td>
-                        <td>${overlaps ? '✅ YES (Conflict)' : 'No'}</td>
+                        <td>${act.start.toLocaleTimeString('en-US', {timeZone: 'America/Denver', hour:'2-digit', minute:'2-digit'})}</td>
+                        <td>${act.end ? act.end.toLocaleTimeString('en-US', {timeZone: 'America/Denver', hour:'2-digit', minute:'2-digit'}) : '—'}</td>
+                        <td>${act.status}</td>
+                        <td>${overlaps ? '✅ YES' : 'No'}</td>
                     </tr>`;
                 });
-                html += `</tbody></table><p class="summary">Total overlaps with Flight Block: ${overlapCount} / ${activities.length}</p>`;
+                html += `</tbody></table>`;
             }
             html += `<hr>`;
             document.getElementById('results').innerHTML += html;
-            document.getElementById('status').innerHTML = '';
+            document.getElementById('status').innerHTML = 'Done.';
         }
 
         function clearResults() {
@@ -181,12 +239,10 @@
             document.getElementById('status').innerHTML = '';
         }
 
-        // Default semester dates
         window.onload = () => {
-            const start = document.getElementById('semesterStart');
-            const end = document.getElementById('semesterEnd');
-            if (!start.value) start.value = '2026-01-01';
-            if (!end.value) end.value = '2026-05-31';
+            renderFlightBlocks();
+            document.getElementById('semesterStart').value = '2026-01-01';
+            document.getElementById('semesterEnd').value = '2026-07-17';
         };
     </script>
 </body>
