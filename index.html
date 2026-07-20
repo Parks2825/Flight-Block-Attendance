@@ -22,6 +22,8 @@
         #status { margin: 10px 0; color: #d32f2f; }
         .summary { font-weight: bold; margin: 15px 0; font-size: 1.1em; }
         .attendance { font-size: 1.4em; color: #0066cc; margin: 20px 0; padding: 15px; background: white; border: 2px solid #0066cc; border-radius: 8px; text-align: center; }
+        .file-inputs { display: flex; flex-direction: column; gap: 10px; margin: 15px 0; }
+        .file-input-group { background: #fdfdfd; padding: 10px; border: 1px dashed #ccc; border-radius: 4px; }
     </style>
 </head>
 <body>
@@ -58,8 +60,19 @@
         <label>Semester Start: <input type="date" id="semesterStart"></label>
         <label>Semester End: <input type="date" id="semesterEnd"></label><br><br>
         
-        <input type="file" id="csvFile" accept=".csv" multiple>
-        <button onclick="processFiles()">Load CSV & Compare</button>
+        <div class="file-inputs">
+            <div class="file-input-group">
+                <label><strong>1. Flight Activity Logs (CSV):</strong><br>
+                <input type="file" id="csvFile" accept=".csv" multiple></label>
+            </div>
+            
+            <div class="file-input-group">
+                <label><strong>2. USU Class Schedule (CSV / ICS / TXT):</strong><br>
+                <input type="file" id="classScheduleFile" accept=".csv, .ics, .txt"></label>
+            </div>
+        </div>
+
+        <button onclick="processFiles()">Load Files & Compare</button>
         <button onclick="clearResults()">Clear</button>
     </div>
     
@@ -70,6 +83,8 @@
         let flightBlocks = [
             { id: 1, name: "Mon/Wed/Fri Morning", days: [1,3,5], start: "08:30", end: "11:00" }
         ];
+
+        let loadedClassSchedule = [];
 
         function renderFlightBlocks() {
             const container = document.getElementById('blockList');
@@ -116,9 +131,11 @@
             }
         }
 
-        function processFiles() {
-            const files = document.getElementById('csvFile').files;
-            if (files.length === 0) return alert('Select CSV file(s)');
+        async function processFiles() {
+            const csvFiles = document.getElementById('csvFile').files;
+            const classScheduleFile = document.getElementById('classScheduleFile').files[0];
+
+            if (csvFiles.length === 0) return alert('Select Flight Activity CSV file(s)');
             if (flightBlocks.length === 0) return alert('Add at least one flight block');
             
             const startInput = document.getElementById('semesterStart').value;
@@ -133,8 +150,14 @@
             
             document.getElementById('results').innerHTML = '';
             document.getElementById('status').innerHTML = 'Processing...';
+
+            // Process USU Class Schedule if provided
+            if (classScheduleFile) {
+                const scheduleText = await classScheduleFile.text();
+                loadedClassSchedule = parseUSUClassSchedule(scheduleText);
+            }
             
-            Array.from(files).forEach(file => {
+            Array.from(csvFiles).forEach(file => {
                 const reader = new FileReader();
                 reader.onload = e => {
                     try {
@@ -148,48 +171,58 @@
             });
         }
 
-function parseStudentScheduleCSV(csvText) {
-    const lines = csvText.trim().split('\n');
-    const activities = [];
-    
-    for (let line of lines) {
-        if (!line.includes('2026')) continue;
-        
-        const fields = line.split('","').map(f => f.replace(/^"|"$/g, '').trim());
-        
-        let startStr = null, endStr = null, type = '', status = '';
-        
-        for (let f of fields) {
-            if (/\d{2} \w{3} 2026 \d{2}:\d{2}/.test(f)) {
-                if (!startStr) startStr = f;
-                else if (!endStr) endStr = f;
-            }
-            if (f.includes('Academic') || f.includes('Oral') || f.includes('Flight') || f.includes('Check')) type = f;
-            if (['Completed','Cancelled'].includes(f)) status = f;
+        function parseUSUClassSchedule(scheduleText) {
+            // Placeholder parser for USU class schedule files
+            const classes = [];
+            const lines = scheduleText.split('\n');
+            lines.forEach(line => {
+                // Add parsing rules specific to USU's export format (e.g., Banner export/CSV)
+            });
+            return classes;
         }
-        
-        // Exclude ONLY if it is "Oral / Normal" AND "Cancelled"
-        if (type.includes('Oral / Normal') && status === 'Cancelled') continue;
 
-        // General exclusions (Academic types & Flight Check Rides)
-        if (type.includes('Academic / Normal') || type.includes('Academic / Test') || type.includes('Flight / Check Ride')) continue;
-        
-        if (startStr) {
-            const start = parseFlexibleDate(startStr);
-            const end = endStr ? parseFlexibleDate(endStr) : null;
+        function parseStudentScheduleCSV(csvText) {
+            const lines = csvText.trim().split('\n');
+            const activities = [];
             
-            if (start) {
-                activities.push({
-                    description: type || 'Flight Activity',
-                    start: start,
-                    end: end,
-                    status: status || 'Completed'
-                });
+            for (let line of lines) {
+                if (!line.includes('2026')) continue;
+                
+                const fields = line.split('","').map(f => f.replace(/^"|"$/g, '').trim());
+                
+                let startStr = null, endStr = null, type = '', status = '';
+                
+                for (let f of fields) {
+                    if (/\d{2} \w{3} 2026 \d{2}:\d{2}/.test(f)) {
+                        if (!startStr) startStr = f;
+                        else if (!endStr) endStr = f;
+                    }
+                    if (f.includes('Academic') || f.includes('Oral') || f.includes('Flight') || f.includes('Check')) type = f;
+                    if (['Completed','Cancelled'].includes(f)) status = f;
+                }
+                
+                // Exclude ONLY if "Oral / Normal" AND "Cancelled"
+                if (type.includes('Oral / Normal') && status === 'Cancelled') continue;
+
+                // General exclusions
+                if (type.includes('Academic / Normal') || type.includes('Academic / Test') || type.includes('Flight / Check Ride')) continue;
+                
+                if (startStr) {
+                    const start = parseFlexibleDate(startStr);
+                    const end = endStr ? parseFlexibleDate(endStr) : null;
+                    
+                    if (start) {
+                        activities.push({
+                            description: type || 'Flight Activity',
+                            start: start,
+                            end: end,
+                            status: status || 'Completed'
+                        });
+                    }
+                }
             }
+            return activities;
         }
-    }
-    return activities;
-}
 
         function parseFlexibleDate(str) {
             if (!str) return null;
@@ -235,10 +268,9 @@ function parseStudentScheduleCSV(csvText) {
             let attendedCount = 0;
 
             const resultsData = blockSlots.map(slot => {
-                // Find if any student activity overlapped with this block slot
                 const matchingActivity = activities.find(act => {
                     if (!act.start) return false;
-                    const actEnd = act.end || new Date(act.start.getTime() + 60*60*1000); // Fallback 1 hr if end missing
+                    const actEnd = act.end || new Date(act.start.getTime() + 60*60*1000);
                     return (act.start < slot.end && actEnd > slot.start);
                 });
 
@@ -256,6 +288,9 @@ function parseStudentScheduleCSV(csvText) {
             const attendancePct = totalSlots > 0 ? Math.round((attendedCount / totalSlots) * 100) : 0;
             
             let html = `<h2>${filename}</h2>`;
+            if (loadedClassSchedule.length > 0) {
+                html += `<p style="color: #2e7d32;">✔ USU Class Schedule loaded (${loadedClassSchedule.length} entries parsed)</p>`;
+            }
             html += `<div class="attendance">📊 Flight Block Attendance Rate<br><strong>${attendancePct}%</strong><br><small>${attendedCount} / ${totalSlots} scheduled block slots fulfilled</small></div>`;
             html += `<p class="summary">Date range: ${semStart.toLocaleDateString()} – ${semEnd.toLocaleDateString()}</p>`;
             
@@ -288,6 +323,8 @@ function parseStudentScheduleCSV(csvText) {
         function clearResults() {
             document.getElementById('results').innerHTML = '';
             document.getElementById('status').innerHTML = '';
+            loadedClassSchedule = [];
+            document.getElementById('classScheduleFile').value = '';
         }
 
         window.onload = () => {
