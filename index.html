@@ -71,11 +71,6 @@
                 <label><strong>2. Flight Activity Logs (CSV):</strong><br>
                 <input type="file" id="csvFile" accept=".csv" multiple></label>
             </div>
-            
-            <div class="file-input-group">
-                <label><strong>3. USU Class Schedule (CSV / ICS / TXT):</strong><br>
-                <input type="file" id="classScheduleFile" accept=".csv, .ics, .txt"></label>
-            </div>
         </div>
 
         <label>Semester Start: <input type="date" id="semesterStart"></label>
@@ -93,7 +88,6 @@
             { id: 1, name: "Mon/Wed/Fri Morning", days: [1,3,5], start: "08:30", end: "11:00" }
         ];
 
-        let loadedClassSchedule = [];
         let noClassDates = [
             '2026-01-18', '2026-02-15', '2026-03-08', '2026-03-09', '2026-03-10', '2026-03-11', '2026-03-12'
         ]; // Default fallback dates
@@ -117,13 +111,12 @@
 
         function parseAcademicCalendarData(data) {
             let parsedNoClassDates = [];
-            const currentYear = 2026; // Adjust if necessary
+            const currentYear = 2026;
 
             data.forEach(row => {
                 const title = String(row.Title || row.title || row.Event || '').trim();
                 const dateStr = String(row.Date || row.date || '').trim();
 
-                // 1. Check for "First Day of Classes"
                 if (title.toLowerCase().includes('first day of classes')) {
                     const parsedStart = parseCalendarDate(dateStr, currentYear);
                     if (parsedStart) {
@@ -131,7 +124,6 @@
                     }
                 }
 
-                // 2. Check for "Last Day of Classes"
                 if (title.toLowerCase().includes('last day of classes')) {
                     const parsedEnd = parseCalendarDate(dateStr, currentYear);
                     if (parsedEnd) {
@@ -139,7 +131,6 @@
                     }
                 }
 
-                // 3. Extract any "no class" days
                 if (title.toLowerCase().includes('no class')) {
                     const dates = extractDatesFromRange(dateStr, currentYear);
                     parsedNoClassDates.push(...dates);
@@ -168,7 +159,6 @@
             const dates = [];
 
             if (cleanStr.includes('-')) {
-                // Example range: "Mar 08 - 12"
                 const parts = cleanStr.split('-').map(s => s.trim());
                 const startMatch = parts[0].match(/([A-Za-z]+)\s+(\d+)/);
                 
@@ -186,7 +176,6 @@
                     }
                 }
             } else {
-                // Single date: "Jan 18"
                 const singleDate = parseCalendarDate(cleanStr, year);
                 if (singleDate) dates.push(singleDate);
             }
@@ -239,9 +228,8 @@
             }
         }
 
-        async function processFiles() {
+        function processFiles() {
             const csvFiles = document.getElementById('csvFile').files;
-            const classScheduleFile = document.getElementById('classScheduleFile').files[0];
 
             if (csvFiles.length === 0) return alert('Select Flight Activity CSV file(s)');
             if (flightBlocks.length === 0) return alert('Add at least one flight block');
@@ -259,11 +247,6 @@
             document.getElementById('results').innerHTML = '';
             document.getElementById('status').innerHTML = 'Processing...';
 
-            if (classScheduleFile) {
-                const scheduleText = await classScheduleFile.text();
-                loadedClassSchedule = parseUSUClassSchedule(scheduleText);
-            }
-            
             Array.from(csvFiles).forEach(file => {
                 const reader = new FileReader();
                 reader.onload = e => {
@@ -276,10 +259,6 @@
                 };
                 reader.readAsText(file);
             });
-        }
-
-        function parseUSUClassSchedule(scheduleText) {
-            return [];
         }
 
         function parseStudentScheduleCSV(csvText) {
@@ -429,8 +408,6 @@
         function clearResults() {
             document.getElementById('results').innerHTML = '';
             document.getElementById('status').innerHTML = '';
-            loadedClassSchedule = [];
-            document.getElementById('classScheduleFile').value = '';
             document.getElementById('academicCalendarFile').value = '';
             document.getElementById('calendarStatus').innerText = '';
         }
