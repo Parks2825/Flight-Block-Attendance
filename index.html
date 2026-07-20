@@ -32,7 +32,7 @@
         <h2>Flight Block Manager</h2>
         <div>
             <label>Block Name: <input type="text" id="blockName" placeholder="e.g. Morning Block" value="Morning Block"></label><br><br>
-            
+           
             <strong>Day(s):</strong>
             <div class="checkbox-group">
                 <label><input type="checkbox" value="1" checked> Monday</label>
@@ -43,13 +43,13 @@
                 <label><input type="checkbox" value="6"> Saturday</label>
                 <label><input type="checkbox" value="0"> Sunday</label>
             </div><br>
-            
+           
             <label>Start Time: <input type="time" id="blockStart" value="08:30"></label>
             <label>End Time: <input type="time" id="blockEnd" value="11:00"></label><br><br>
-            
+           
             <button onclick="addFlightBlock()">Add Flight Block</button>
         </div>
-        
+       
         <div class="block-list" id="blockList"></div>
     </div>
 
@@ -57,12 +57,12 @@
     <div class="controls">
         <label>Semester Start: <input type="date" id="semesterStart"></label>
         <label>Semester End: <input type="date" id="semesterEnd"></label><br><br>
-        
+       
         <input type="file" id="csvFile" accept=".csv" multiple>
         <button onclick="processFiles()">Load CSV & Compare</button>
         <button onclick="clearResults()">Clear</button>
     </div>
-    
+   
     <div id="status"></div>
     <div id="results"></div>
 
@@ -74,7 +74,6 @@
         function renderFlightBlocks() {
             const container = document.getElementById('blockList');
             container.innerHTML = '<strong>Active Flight Blocks:</strong><br>';
-            
             flightBlocks.forEach((block, index) => {
                 const dayNames = block.days.map(d => ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d]).join(', ');
                 const div = document.createElement('div');
@@ -89,19 +88,15 @@
 
         function addFlightBlock() {
             const name = document.getElementById('blockName').value.trim() || `Block ${flightBlocks.length + 1}`;
-            
             const checkboxes = document.querySelectorAll('.checkbox-group input[type="checkbox"]');
-            const selectedDays = Array.from(checkboxes)
-                .filter(cb => cb.checked)
-                .map(cb => parseInt(cb.value));
-            
+            const selectedDays = Array.from(checkboxes).filter(cb => cb.checked).map(cb => parseInt(cb.value));
             const start = document.getElementById('blockStart').value;
             const end = document.getElementById('blockEnd').value;
-            
+           
             if (selectedDays.length === 0 || !start || !end) {
                 return alert('Please select at least one day and set times');
             }
-            
+           
             flightBlocks.push({
                 id: Date.now(),
                 name: name,
@@ -109,7 +104,7 @@
                 start: start,
                 end: end
             });
-            
+           
             renderFlightBlocks();
             document.getElementById('blockName').value = '';
         }
@@ -125,14 +120,14 @@
             const files = document.getElementById('csvFile').files;
             if (files.length === 0) return alert('Select CSV file(s)');
             if (flightBlocks.length === 0) return alert('Add at least one flight block');
-
+            
             const semesterStart = document.getElementById('semesterStart').value ? new Date(document.getElementById('semesterStart').value) : null;
             let semesterEnd = document.getElementById('semesterEnd').value ? new Date(document.getElementById('semesterEnd').value) : null;
             if (semesterEnd) semesterEnd.setHours(23,59,59,999);
-
+            
             document.getElementById('results').innerHTML = '';
             document.getElementById('status').innerHTML = 'Processing...';
-
+            
             Array.from(files).forEach(file => {
                 const reader = new FileReader();
                 reader.onload = e => {
@@ -150,14 +145,14 @@
         function parseStudentScheduleCSV(csvText, semesterStart, semesterEnd) {
             const lines = csvText.trim().split('\n');
             const activities = [];
-            
+           
             for (let line of lines) {
                 if (!line.includes('2026')) continue;
-                
+               
                 const fields = line.split('","').map(f => f.replace(/^"|"$/g, '').trim());
-                
+               
                 let startStr = null, endStr = null, type = '', status = '';
-                
+               
                 for (let f of fields) {
                     if (/\d{2} \w{3} 2026 \d{2}:\d{2}/.test(f)) {
                         if (!startStr) startStr = f;
@@ -166,14 +161,15 @@
                     if (f.includes('Academic') || f.includes('Oral') || f.includes('Flight') || f.includes('Check')) type = f;
                     if (['Completed','Cancelled'].includes(f)) status = f;
                 }
-                
-                if (type.includes('Academic / Normal')) continue;
-                if (status === 'Cancelled') continue;  // NEW: Exclude Cancelled from attendance
-                
+               
+                // Exclude Academic types
+                if (type.includes('Academic / Normal') || type.includes('Academic / Test')) continue;
+                if (status === 'Cancelled') continue;
+               
                 if (startStr) {
                     const start = parseFlexibleDate(startStr);
                     const end = endStr ? parseFlexibleDate(endStr) : null;
-                    
+                   
                     if (start && (!semesterStart || start >= semesterStart) && (!semesterEnd || start <= semesterEnd)) {
                         activities.push({
                             id: start.toLocaleDateString(),
@@ -199,7 +195,7 @@
             const mt = new Date(date.toLocaleString("en-US", {timeZone: 'America/Denver'}));
             const day = mt.getDay();
             const mins = mt.getHours() * 60 + mt.getMinutes();
-            
+           
             for (let block of flightBlocks) {
                 if (block.days.includes(day)) {
                     const [sh, sm] = block.start.split(':').map(Number);
@@ -215,17 +211,17 @@
         }
 
         function displayResults(filename, activities, semStart, semEnd) {
-            const total = activities.length;           // only Completed + other non-Cancelled
+            const total = activities.length;
             const overlaps = activities.filter(checkOverlap).length;
             const attendancePct = total > 0 ? Math.round((overlaps / total) * 100) : 0;
-            
+           
             let html = `<h2>${filename}</h2>`;
-            html += `<div class="attendance">📊 Flight Block Attendance<br>(excluding Academic / Normal and Cancelled): <strong>${attendancePct}%</strong><br><small>${overlaps} / ${total} qualifying activities</small></div>`;
-            
+            html += `<div class="attendance">📊 Flight Block Attendance<br>(excluding Academic / Normal, Academic / Test, and Cancelled): <strong>${attendancePct}%</strong><br><small>${overlaps} / ${total} qualifying activities</small></div>`;
+           
             if (semStart || semEnd) html += `<p class="summary">Date range: ${semStart ? semStart.toLocaleDateString() : ''} – ${semEnd ? semEnd.toLocaleDateString() : ''}</p>`;
-            
+           
             if (total === 0) {
-                html += `<p>No qualifying (non-cancelled, non-academic) activities found.</p>`;
+                html += `<p>No qualifying (non-academic, non-cancelled) activities found.</p>`;
             } else {
                 html += `<table><thead><tr><th>Date</th><th>Description</th><th>Start (MT)</th><th>End (MT)</th><th>Status</th><th>In Block?</th></tr></thead><tbody>`;
                 activities.forEach(act => {
