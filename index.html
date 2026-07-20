@@ -148,48 +148,46 @@
             });
         }
 
-function parseStudentScheduleCSV(csvText) {
-    const lines = csvText.trim().split('\n');
-    const activities = [];
-    
-    for (let line of lines) {
-        if (!line.includes('2026')) continue;
-        
-        const fields = line.split('","').map(f => f.replace(/^"|"$/g, '').trim());
-        
-        let startStr = null, endStr = null, type = '', status = '';
-        
-        for (let f of fields) {
-            if (/\d{2} \w{3} 2026 \d{2}:\d{2}/.test(f)) {
-                if (!startStr) startStr = f;
-                else if (!endStr) endStr = f;
-            }
-            if (f.includes('Academic') || f.includes('Oral') || f.includes('Flight') || f.includes('Check')) type = f;
-            if (['Completed','Cancelled'].includes(f)) status = f;
-        }
-        
-        // 1. Exclude cancelled activities
-        if (status === 'Cancelled') continue;
-
-        // 2. Only include "Oral / Normal" activities
-        if (!type.includes('Oral / Normal')) continue;
-        
-        if (startStr) {
-            const start = parseFlexibleDate(startStr);
-            const end = endStr ? parseFlexibleDate(endStr) : null;
+        function parseStudentScheduleCSV(csvText) {
+            const lines = csvText.trim().split('\n');
+            const activities = [];
             
-            if (start) {
-                activities.push({
-                    description: type || 'Oral / Normal',
-                    start: start,
-                    end: end,
-                    status: status || 'Completed'
-                });
+            for (let line of lines) {
+                if (!line.includes('2026')) continue;
+                
+                const fields = line.split('","').map(f => f.replace(/^"|"$/g, '').trim());
+                
+                let startStr = null, endStr = null, type = '', status = '';
+                
+                for (let f of fields) {
+                    if (/\d{2} \w{3} 2026 \d{2}:\d{2}/.test(f)) {
+                        if (!startStr) startStr = f;
+                        else if (!endStr) endStr = f;
+                    }
+                    if (f.includes('Academic') || f.includes('Oral') || f.includes('Flight') || f.includes('Check')) type = f;
+                    if (['Completed','Cancelled'].includes(f)) status = f;
+                }
+                
+                // Filter out non-qualifying activities
+                if (type.includes('Academic / Normal') || type.includes('Academic / Test') || type.includes('Flight / Check Ride')) continue;
+                if (status === 'Cancelled') continue;
+                
+                if (startStr) {
+                    const start = parseFlexibleDate(startStr);
+                    const end = endStr ? parseFlexibleDate(endStr) : null;
+                    
+                    if (start) {
+                        activities.push({
+                            description: type || 'Flight Activity',
+                            start: start,
+                            end: end,
+                            status: status || 'Completed'
+                        });
+                    }
+                }
             }
+            return activities;
         }
-    }
-    return activities;
-}
 
         function parseFlexibleDate(str) {
             if (!str) return null;
