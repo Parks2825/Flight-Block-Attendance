@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Flight Block Comparator</title>
+    <!-- SheetJS library for reading Excel (.xlsx/.xls) files directly in browser -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; background: #f9f9f9; }
         h1, h2 { color: #333; }
@@ -24,6 +26,7 @@
         .attendance { font-size: 1.4em; color: #0066cc; margin: 20px 0; padding: 15px; background: white; border: 2px solid #0066cc; border-radius: 8px; text-align: center; }
         .file-inputs { display: flex; flex-direction: column; gap: 10px; margin: 15px 0; }
         .file-input-group { background: #fdfdfd; padding: 10px; border: 1px dashed #ccc; border-radius: 4px; }
+        .calendar-status { margin-top: 5px; font-weight: bold; color: #2e7d32; }
     </style>
 </head>
 <body>
@@ -57,20 +60,26 @@
 
     <!-- Main Controls -->
     <div class="controls">
-        <label>Semester Start: <input type="date" id="semesterStart"></label>
-        <label>Semester End: <input type="date" id="semesterEnd"></label><br><br>
-        
         <div class="file-inputs">
             <div class="file-input-group">
-                <label><strong>1. Flight Activity Logs (CSV):</strong><br>
+                <label><strong>1. Academic Calendar (.xlsx, .xls, .csv):</strong><br>
+                <input type="file" id="academicCalendarFile" accept=".xlsx, .xls, .csv" onchange="handleAcademicCalendar(this)"></label>
+                <div id="calendarStatus" class="calendar-status"></div>
+            </div>
+
+            <div class="file-input-group">
+                <label><strong>2. Flight Activity Logs (CSV):</strong><br>
                 <input type="file" id="csvFile" accept=".csv" multiple></label>
             </div>
             
             <div class="file-input-group">
-                <label><strong>2. USU Class Schedule (CSV / ICS / TXT):</strong><br>
+                <label><strong>3. USU Class Schedule (CSV / ICS / TXT):</strong><br>
                 <input type="file" id="classScheduleFile" accept=".csv, .ics, .txt"></label>
             </div>
         </div>
+
+        <label>Semester Start: <input type="date" id="semesterStart"></label>
+        <label>Semester End: <input type="date" id="semesterEnd"></label><br><br>
 
         <button onclick="processFiles()">Load Files & Compare</button>
         <button onclick="clearResults()">Clear</button>
@@ -85,17 +94,105 @@
         ];
 
         let loadedClassSchedule = [];
+        let noClassDates = [
+            '2026-01-18', '2026-02-15', '2026-03-08', '2026-03-09', '2026-03-10', '2026-03-11', '2026-03-12'
+        ]; // Default fallback dates
 
-        // "No Class" holidays parsed from Spring 2026 Academic Calendar
-        const noClassDates = [
-            '2026-01-18', // Martin Luther King, Jr. Day
-            '2026-02-15', // Presidents' Day
-            '2026-03-08', // Spring Break
-            '2026-03-09', // Spring Break
-            '2026-03-10', // Spring Break
-            '2026-03-11', // Spring Break
-            '2026-03-12'  // Spring Break
-        ];
+        function handleAcademicCalendar(input) {
+            const file = input.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                const json = XLSX.utils.sheet_to_json(worksheet);
+
+                parseAcademicCalendarData(json);
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function parseAcademicCalendarData(data) {
+            let parsedNoClassDates = [];
+            const currentYear = 2026; // Adjust if necessary
+
+            data.forEach(row => {
+                const title = String(row.Title || row.title || row.Event || '').trim();
+                const dateStr = String(row.Date || row.date || '').trim();
+
+                // 1. Check for "First Day of Classes"
+                if (title.toLowerCase().includes('first day of classes')) {
+                    const parsedStart = parseCalendarDate(dateStr, currentYear);
+                    if (parsedStart) {
+                        document.getElementById('semesterStart').value = parsedStart;
+                    }
+                }
+
+                // 2. Check for "Last Day of Classes"
+                if (title.toLowerCase().includes('last day of classes')) {
+                    const parsedEnd = parseCalendarDate(dateStr, currentYear);
+                    if (parsedEnd) {
+                        document.getElementById('semesterEnd').value = parsedEnd;
+                    }
+                }
+
+                // 3. Extract any "no class" days
+                if (title.toLowerCase().includes('no class')) {
+                    const dates = extractDatesFromRange(dateStr, currentYear);
+                    parsedNoClassDates.push(...dates);
+                }
+            });
+
+            if (parsedNoClassDates.length > 0) {
+                noClassDates = parsedNoClassDates;
+            }
+
+            document.getElementById('calendarStatus').innerText = 
+                `✔ Loaded Calendar: Start (${document.getElementById('semesterStart').value}), End (${document.getElementById('semesterEnd').value}), ${noClassDates.length} "no class" dates detected.`;
+        }
+
+        function parseCalendarDate(str, year) {
+            const cleanStr = str.replace(/[\u00A0\s]+/g, ' ').trim();
+            const dateObj = new Date(`${cleanStr} ${year}`);
+            if (!isNaN(dateObj.getTime())) {
+                return dateObj.toISOString().split('T')[0];
+            }
+            return null;
+        }
+
+        function extractDatesFromRange(dateStr, year) {
+            const cleanStr = dateStr.replace(/[\u00A0\s]+/g, ' ').trim();
+            const dates = [];
+
+            if (cleanStr.includes('-')) {
+                // Example range: "Mar 08 - 12"
+                const parts = cleanStr.split('-').map(s => s.trim());
+                const startMatch = parts[0].match(/([A-Za-z]+)\s+(\d+)/);
+                
+                if (startMatch) {
+                    const month = startMatch[1];
+                    const startDay = parseInt(startMatch[2]);
+                    const endDayMatch = parts[1].match(/\d+/);
+                    const endDay = endDayMatch ? parseInt(endDayMatch[0]) : startDay;
+
+                    for (let d = startDay; d <= endDay; d++) {
+                        const dateObj = new Date(`${month} ${d} ${year}`);
+                        if (!isNaN(dateObj.getTime())) {
+                            dates.push(dateObj.toISOString().split('T')[0]);
+                        }
+                    }
+                }
+            } else {
+                // Single date: "Jan 18"
+                const singleDate = parseCalendarDate(cleanStr, year);
+                if (singleDate) dates.push(singleDate);
+            }
+
+            return dates;
+        }
 
         function renderFlightBlocks() {
             const container = document.getElementById('blockList');
@@ -182,12 +279,7 @@
         }
 
         function parseUSUClassSchedule(scheduleText) {
-            const classes = [];
-            const lines = scheduleText.split('\n');
-            lines.forEach(line => {
-                // Parsing logic for class schedules can be expanded here
-            });
-            return classes;
+            return [];
         }
 
         function parseStudentScheduleCSV(csvText) {
@@ -210,10 +302,7 @@
                     if (['Completed','Cancelled'].includes(f)) status = f;
                 }
                 
-                // Exclude ONLY if "Oral / Normal" AND "Cancelled"
                 if (type.includes('Oral / Normal') && status === 'Cancelled') continue;
-
-                // General exclusions
                 if (type.includes('Academic / Normal') || type.includes('Academic / Test') || type.includes('Flight / Check Ride')) continue;
                 
                 if (startStr) {
@@ -253,7 +342,6 @@
             while (current <= semesterEnd) {
                 const dateKey = formatDateKey(current);
 
-                // Exclude any dates matching "no class" days
                 if (!noClassDates.includes(dateKey)) {
                     const dayOfWeek = current.getDay();
 
@@ -309,9 +397,6 @@
             const attendancePct = totalSlots > 0 ? Math.round((attendedCount / totalSlots) * 100) : 0;
             
             let html = `<h2>${filename}</h2>`;
-            if (loadedClassSchedule.length > 0) {
-                html += `<p style="color: #2e7d32;">✔ USU Class Schedule loaded (${loadedClassSchedule.length} entries parsed)</p>`;
-            }
             html += `<div class="attendance">📊 Flight Block Attendance Rate<br><strong>${attendancePct}%</strong><br><small>${attendedCount} / ${totalSlots} scheduled block slots fulfilled (excluding holidays/breaks)</small></div>`;
             html += `<p class="summary">Date range: ${semStart.toLocaleDateString()} – ${semEnd.toLocaleDateString()}</p>`;
             
@@ -346,11 +431,12 @@
             document.getElementById('status').innerHTML = '';
             loadedClassSchedule = [];
             document.getElementById('classScheduleFile').value = '';
+            document.getElementById('academicCalendarFile').value = '';
+            document.getElementById('calendarStatus').innerText = '';
         }
 
         window.onload = () => {
             renderFlightBlocks();
-            // Automatically set Semester Start & Semester End from Spring 2026 Calendar
             document.getElementById('semesterStart').value = '2026-01-11';
             document.getElementById('semesterEnd').value = '2026-04-27';
         };
