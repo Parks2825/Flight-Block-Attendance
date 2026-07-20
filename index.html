@@ -86,6 +86,17 @@
 
         let loadedClassSchedule = [];
 
+        // "No Class" holidays parsed from Spring 2026 Academic Calendar
+        const noClassDates = [
+            '2026-01-18', // Martin Luther King, Jr. Day
+            '2026-02-15', // Presidents' Day
+            '2026-03-08', // Spring Break
+            '2026-03-09', // Spring Break
+            '2026-03-10', // Spring Break
+            '2026-03-11', // Spring Break
+            '2026-03-12'  // Spring Break
+        ];
+
         function renderFlightBlocks() {
             const container = document.getElementById('blockList');
             container.innerHTML = '<strong>Active Flight Blocks:</strong><br>';
@@ -151,7 +162,6 @@
             document.getElementById('results').innerHTML = '';
             document.getElementById('status').innerHTML = 'Processing...';
 
-            // Process USU Class Schedule if provided
             if (classScheduleFile) {
                 const scheduleText = await classScheduleFile.text();
                 loadedClassSchedule = parseUSUClassSchedule(scheduleText);
@@ -172,11 +182,10 @@
         }
 
         function parseUSUClassSchedule(scheduleText) {
-            // Placeholder parser for USU class schedule files
             const classes = [];
             const lines = scheduleText.split('\n');
             lines.forEach(line => {
-                // Add parsing rules specific to USU's export format (e.g., Banner export/CSV)
+                // Parsing logic for class schedules can be expanded here
             });
             return classes;
         }
@@ -230,32 +239,44 @@
             return !isNaN(date.getTime()) ? date : null;
         }
 
+        function formatDateKey(dateObj) {
+            const year = dateObj.getFullYear();
+            const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+            const day = String(dateObj.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
         function generateExpectedBlockSlots(semesterStart, semesterEnd) {
             const slots = [];
             let current = new Date(semesterStart);
 
             while (current <= semesterEnd) {
-                const dayOfWeek = current.getDay();
+                const dateKey = formatDateKey(current);
 
-                flightBlocks.forEach(block => {
-                    if (block.days.includes(dayOfWeek)) {
-                        const [sh, sm] = block.start.split(':').map(Number);
-                        const [eh, em] = block.end.split(':').map(Number);
+                // Exclude any dates matching "no class" days
+                if (!noClassDates.includes(dateKey)) {
+                    const dayOfWeek = current.getDay();
 
-                        const blockStart = new Date(current);
-                        blockStart.setHours(sh, sm, 0, 0);
+                    flightBlocks.forEach(block => {
+                        if (block.days.includes(dayOfWeek)) {
+                            const [sh, sm] = block.start.split(':').map(Number);
+                            const [eh, em] = block.end.split(':').map(Number);
 
-                        const blockEnd = new Date(current);
-                        blockEnd.setHours(eh, em, 0, 0);
+                            const blockStart = new Date(current);
+                            blockStart.setHours(sh, sm, 0, 0);
 
-                        slots.push({
-                            date: new Date(current),
-                            blockName: block.name,
-                            start: blockStart,
-                            end: blockEnd
-                        });
-                    }
-                });
+                            const blockEnd = new Date(current);
+                            blockEnd.setHours(eh, em, 0, 0);
+
+                            slots.push({
+                                date: new Date(current),
+                                blockName: block.name,
+                                start: blockStart,
+                                end: blockEnd
+                            });
+                        }
+                    });
+                }
 
                 current.setDate(current.getDate() + 1);
             }
@@ -291,7 +312,7 @@
             if (loadedClassSchedule.length > 0) {
                 html += `<p style="color: #2e7d32;">✔ USU Class Schedule loaded (${loadedClassSchedule.length} entries parsed)</p>`;
             }
-            html += `<div class="attendance">📊 Flight Block Attendance Rate<br><strong>${attendancePct}%</strong><br><small>${attendedCount} / ${totalSlots} scheduled block slots fulfilled</small></div>`;
+            html += `<div class="attendance">📊 Flight Block Attendance Rate<br><strong>${attendancePct}%</strong><br><small>${attendedCount} / ${totalSlots} scheduled block slots fulfilled (excluding holidays/breaks)</small></div>`;
             html += `<p class="summary">Date range: ${semStart.toLocaleDateString()} – ${semEnd.toLocaleDateString()}</p>`;
             
             if (totalSlots === 0) {
@@ -329,8 +350,9 @@
 
         window.onload = () => {
             renderFlightBlocks();
-            document.getElementById('semesterStart').value = '2026-01-01';
-            document.getElementById('semesterEnd').value = '2026-07-17';
+            // Automatically set Semester Start & Semester End from Spring 2026 Calendar
+            document.getElementById('semesterStart').value = '2026-01-11';
+            document.getElementById('semesterEnd').value = '2026-04-27';
         };
     </script>
 </body>
