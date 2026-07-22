@@ -16,8 +16,8 @@
         .absent { background-color: #fff3cd !important; font-weight: bold; color: #856404; }
         .no-overlap { background-color: #ffdddd !important; }
         .controls, .block-manager { margin: 20px 0; padding: 15px; background: white; border: 1px solid #ddd; border-radius: 6px; }
-        button { margin: 5px; padding: 8px 16px; }
-        input[type="date"], input[type="time"], input[type="text"] { padding: 6px; }
+        button { margin: 5px; padding: 8px 16px; cursor: pointer; }
+        input[type="date"], input[type="time"], input[type="text"], select { padding: 6px; font-size: 0.95em; }
         .checkbox-group { display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0; }
         .checkbox-group label { display: flex; align-items: center; gap: 4px; }
         .block-list { margin-top: 10px; }
@@ -29,6 +29,7 @@
         .file-input-group { background: #fdfdfd; padding: 10px; border: 1px dashed #ccc; border-radius: 4px; }
         .status-msg { margin-top: 5px; font-weight: bold; color: #2e7d32; }
         .badge-absent { background: #ffc107; color: #000; padding: 3px 6px; border-radius: 4px; font-size: 0.85em; }
+        .semester-picker-box { background: #eef6ff; border: 1px solid #b6d4fe; padding: 12px; border-radius: 6px; margin-bottom: 15px; }
     </style>
 </head>
 <body>
@@ -62,9 +63,22 @@
 
     <!-- Main Controls -->
     <div class="controls">
+        <!-- USU Semester Quick Selector -->
+        <div class="semester-picker-box">
+            <label><strong>Select USU Academic Semester:</strong> </label>
+            <select id="usuSemesterSelect" onchange="loadUSUSemesterData()">
+                <option value="spring2026">USU Spring Semester 2026</option>
+                <option value="summer2026">USU Summer Semester 2026</option>
+                <option value="fall2026">USU Fall Semester 2026</option>
+                <option value="spring2027">USU Spring Semester 2027</option>
+                <option value="custom">Custom Date Range (Upload Calendar)</option>
+            </select>
+            <span id="semesterDataBadge" style="margin-left: 10px; font-size: 0.9em; color: #555;"></span>
+        </div>
+
         <div class="file-inputs">
             <div class="file-input-group">
-                <label><strong>1. Academic Calendar (.xlsx, .xls, .csv):</strong><br>
+                <label><strong>1. Academic Calendar File (Optional if USU Semester is selected):</strong><br>
                 <input type="file" id="academicCalendarFile" accept=".xlsx, .xls, .csv" onchange="handleAcademicCalendar(this)"></label>
                 <div id="calendarStatus" class="status-msg"></div>
             </div>
@@ -93,11 +107,67 @@
 
     <script>
         let flightBlocks = [];
-        let cancellationRecords = []; // Stores parsed cancellation entries
+        let cancellationRecords = [];
+        let noClassDates = [];
 
-        let noClassDates = [
-            '2026-01-18', '2026-02-15', '2026-03-08', '2026-03-09', '2026-03-10', '2026-03-11', '2026-03-12'
-        ]; // Default fallback dates
+        // Built-in Utah State University (USU) Academic Calendar Database
+        const usuSemesters = {
+            spring2026: {
+                start: '2026-01-05',
+                end: '2026-04-21',
+                noClass: [
+                    '2026-01-19', // MLK Jr. Day
+                    '2026-02-16', // Presidents' Day
+                    '2026-03-09', '2026-03-10', '2026-03-11', '2026-03-12', '2026-03-13' // Spring Break
+                ]
+            },
+            summer2026: {
+                start: '2026-05-04',
+                end: '2026-08-07',
+                noClass: [
+                    '2026-05-25', // Memorial Day
+                    '2026-06-15', // Juneteenth
+                    '2026-07-03', // Independence Day
+                    '2026-07-24'  // Pioneer Day
+                ]
+            },
+            fall2026: {
+                start: '2026-08-31',
+                end: '2026-12-11',
+                noClass: [
+                    '2026-09-07', // Labor Day
+                    '2026-10-09', // Fall Break
+                    '2026-11-25', '2026-11-26', '2026-11-27' // Thanksgiving Holiday
+                ]
+            },
+            spring2027: {
+                start: '2027-01-11',
+                end: '2027-04-27',
+                noClass: [
+                    '2027-01-18', // MLK Jr. Day
+                    '2027-02-15', // Presidents' Day
+                    '2027-03-08', '2027-03-09', '2027-03-10', '2027-03-11', '2027-03-12' // Spring Break
+                ]
+            }
+        };
+
+        function loadUSUSemesterData() {
+            const selectedKey = document.getElementById('usuSemesterSelect').value;
+            const badge = document.getElementById('semesterDataBadge');
+
+            if (selectedKey === 'custom') {
+                badge.innerHTML = '<em>Custom dates enabled. Upload calendar or enter manually.</em>';
+                return;
+            }
+
+            const semData = usuSemesters[selectedKey];
+            if (semData) {
+                document.getElementById('semesterStart').value = semData.start;
+                document.getElementById('semesterEnd').value = semData.end;
+                noClassDates = [...semData.noClass];
+                badge.innerHTML = `✔ Loaded preset: <strong>${semData.start}</strong> to <strong>${semData.end}</strong> (${noClassDates.length} "no class" dates).`;
+            }
+        }
 
         function handleAcademicCalendar(input) {
             const file = input.files[0];
@@ -112,6 +182,7 @@
                 const json = XLSX.utils.sheet_to_json(worksheet);
 
                 parseAcademicCalendarData(json);
+                document.getElementById('usuSemesterSelect').value = 'custom';
             };
             reader.readAsArrayBuffer(file);
         }
@@ -149,7 +220,7 @@
             }
 
             document.getElementById('calendarStatus').innerText = 
-                `✔ Loaded Calendar: Start (${document.getElementById('semesterStart').value}), End (${document.getElementById('semesterEnd').value}), ${noClassDates.length} "no class" dates detected.`;
+                `✔ Loaded Uploaded Calendar: Start (${document.getElementById('semesterStart').value}), End (${document.getElementById('semesterEnd').value}), ${noClassDates.length} "no class" dates detected.`;
         }
 
         function handleCancellationFile(input) {
@@ -312,12 +383,12 @@
             const checkDates = [];
 
             for (let line of lines) {
-                if (!line.includes('2026')) continue;
+                if (!/\d{4}/.test(line)) continue;
                 const fields = line.split('","').map(f => f.replace(/^"|"$/g, '').trim());
                 
                 let startStr = null, type = '';
                 for (let f of fields) {
-                    if (/\d{2} \w{3} 2026 \d{2}:\d{2}/.test(f) && !startStr) {
+                    if (/\d{2} \w{3} \d{4} \d{2}:\d{2}/.test(f) && !startStr) {
                         startStr = f;
                     }
                     if (f.includes('Academic') || f.includes('Oral') || f.includes('Flight') || f.includes('Check')) type = f;
@@ -341,14 +412,14 @@
             const activities = [];
             
             for (let line of lines) {
-                if (!line.includes('2026')) continue;
+                if (!/\d{4}/.test(line)) continue;
                 
                 const fields = line.split('","').map(f => f.replace(/^"|"$/g, '').trim());
                 
                 let startStr = null, endStr = null, type = '', status = '', reasonStr = '';
                 
                 for (let f of fields) {
-                    if (/\d{2} \w{3} 2026 \d{2}:\d{2}/.test(f)) {
+                    if (/\d{2} \w{3} \d{4} \d{2}:\d{2}/.test(f)) {
                         if (!startStr) startStr = f;
                         else if (!endStr) endStr = f;
                     }
@@ -366,7 +437,6 @@
                     const end = endStr ? parseFlexibleDate(endStr) : null;
                     const dateKey = start ? formatDateKey(start) : null;
 
-                    // Check for matching cancellation log entry
                     let isStudentAbsent = reasonStr.toLowerCase().includes('student absent');
                     let cancellationReason = reasonStr;
 
@@ -378,7 +448,6 @@
                         }
                     }
                     
-                    // Exclude cancelled activities UNLESS the reason is 'student absent'
                     if (status === 'Cancelled' && !isStudentAbsent) continue;
 
                     if (start) {
@@ -547,12 +616,12 @@
             document.getElementById('calendarStatus').innerText = '';
             document.getElementById('cancellationStatus').innerText = '';
             cancellationRecords = [];
+            loadUSUSemesterData();
         }
 
         window.onload = () => {
             renderFlightBlocks();
-            document.getElementById('semesterStart').value = '2026-01-11';
-            document.getElementById('semesterEnd').value = '2026-04-27';
+            loadUSUSemesterData();
         };
     </script>
 </body>
