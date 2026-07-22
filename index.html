@@ -13,6 +13,7 @@
         th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
         th { background-color: #f2f2f2; }
         .overlap { background-color: #ddffdd !important; font-weight: bold; }
+        .absent { background-color: #fff3cd !important; font-weight: bold; color: #856404; }
         .no-overlap { background-color: #ffdddd !important; }
         .controls, .block-manager { margin: 20px 0; padding: 15px; background: white; border: 1px solid #ddd; border-radius: 6px; }
         button { margin: 5px; padding: 8px 16px; }
@@ -26,7 +27,8 @@
         .attendance { font-size: 1.4em; color: #0066cc; margin: 20px 0; padding: 15px; background: white; border: 2px solid #0066cc; border-radius: 8px; text-align: center; }
         .file-inputs { display: flex; flex-direction: column; gap: 10px; margin: 15px 0; }
         .file-input-group { background: #fdfdfd; padding: 10px; border: 1px dashed #ccc; border-radius: 4px; }
-        .calendar-status { margin-top: 5px; font-weight: bold; color: #2e7d32; }
+        .status-msg { margin-top: 5px; font-weight: bold; color: #2e7d32; }
+        .badge-absent { background: #ffc107; color: #000; padding: 3px 6px; border-radius: 4px; font-size: 0.85em; }
     </style>
 </head>
 <body>
@@ -64,11 +66,17 @@
             <div class="file-input-group">
                 <label><strong>1. Academic Calendar (.xlsx, .xls, .csv):</strong><br>
                 <input type="file" id="academicCalendarFile" accept=".xlsx, .xls, .csv" onchange="handleAcademicCalendar(this)"></label>
-                <div id="calendarStatus" class="calendar-status"></div>
+                <div id="calendarStatus" class="status-msg"></div>
             </div>
 
             <div class="file-input-group">
-                <label><strong>2. Flight Activity Logs (CSV):</strong><br>
+                <label><strong>2. Cancellation Reasons Log (.xlsx, .xls, .csv):</strong><br>
+                <input type="file" id="cancellationFile" accept=".xlsx, .xls, .csv" onchange="handleCancellationFile(this)"></label>
+                <div id="cancellationStatus" class="status-msg"></div>
+            </div>
+
+            <div class="file-input-group">
+                <label><strong>3. Flight Activity Logs (CSV):</strong><br>
                 <input type="file" id="csvFile" accept=".csv" multiple></label>
             </div>
         </div>
@@ -85,6 +93,7 @@
 
     <script>
         let flightBlocks = [];
+        let cancellationRecords = []; // Stores parsed cancellation entries
 
         let noClassDates = [
             '2026-01-18', '2026-02-15', '2026-03-08', '2026-03-09', '2026-03-10', '2026-03-11', '2026-03-12'
@@ -141,6 +150,38 @@
 
             document.getElementById('calendarStatus').innerText = 
                 `✔ Loaded Calendar: Start (${document.getElementById('semesterStart').value}), End (${document.getElementById('semesterEnd').value}), ${noClassDates.length} "no class" dates detected.`;
+        }
+
+        function handleCancellationFile(input) {
+            const file = input.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                const json = XLSX.utils.sheet_to_json(worksheet);
+
+                cancellationRecords = json.map(row => {
+                    const reason = String(row.Reason || row.reason || row['Cancellation Reason'] || row.Remarks || '').trim();
+                    const dateVal = String(row.Date || row.date || row['Start Time'] || '').trim();
+                    const parsedDate = parseFlexibleDate(dateVal);
+                    
+                    return {
+                        dateKey: parsedDate ? formatDateKey(parsedDate) : null,
+                        rawDate: dateVal,
+                        reason: reason,
+                        isStudentAbsent: reason.toLowerCase().includes('student absent')
+                    };
+                }).filter(item => item.reason.length > 0);
+
+                const absentCount = cancellationRecords.filter(r => r.isStudentAbsent).length;
+                document.getElementById('cancellationStatus').innerText = 
+                    `✔ Loaded ${cancellationRecords.length} cancellation record(s) (${absentCount} flagged as "Student Absent").`;
+            };
+            reader.readAsArrayBuffer(file);
         }
 
         function parseCalendarDate(str, year) {
@@ -304,7 +345,7 @@
                 
                 const fields = line.split('","').map(f => f.replace(/^"|"$/g, '').trim());
                 
-                let startStr = null, endStr = null, type = '', status = '';
+                let startStr = null, endStr = null, type = '', status = '', reasonStr = '';
                 
                 for (let f of fields) {
                     if (/\d{2} \w{3} 2026 \d{2}:\d{2}/.test(f)) {
@@ -312,22 +353,42 @@
                         else if (!endStr) endStr = f;
                     }
                     if (f.includes('Academic') || f.includes('Oral') || f.includes('Flight') || f.includes('Check')) type = f;
-                    if (['Completed','Cancelled'].includes(f)) status = f;
+                    if (['Completed','Cancelled','Scheduled'].includes(f)) status = f;
+                    if (f.toLowerCase().includes('student absent') || f.toLowerCase().includes('cancellation reason')) {
+                        reasonStr = f;
+                    }
                 }
                 
-                if (type.includes('Oral / Normal') && status === 'Cancelled') continue;
                 if (type.includes('Academic / Normal') || type.includes('Academic / Test') || type.includes('Flight / Check Ride')) continue;
                 
                 if (startStr) {
                     const start = parseFlexibleDate(startStr);
                     const end = endStr ? parseFlexibleDate(endStr) : null;
+                    const dateKey = start ? formatDateKey(start) : null;
+
+                    // Check for matching cancellation log entry
+                    let isStudentAbsent = reasonStr.toLowerCase().includes('student absent');
+                    let cancellationReason = reasonStr;
+
+                    if (!isStudentAbsent && dateKey) {
+                        const match = cancellationRecords.find(c => c.dateKey === dateKey && c.isStudentAbsent);
+                        if (match) {
+                            isStudentAbsent = true;
+                            cancellationReason = match.reason;
+                        }
+                    }
                     
+                    // Exclude cancelled activities UNLESS the reason is 'student absent'
+                    if (status === 'Cancelled' && !isStudentAbsent) continue;
+
                     if (start) {
                         activities.push({
                             description: type || 'Flight Activity',
                             start: start,
                             end: end,
-                            status: status || 'Completed'
+                            status: status || 'Completed',
+                            isStudentAbsent: isStudentAbsent,
+                            cancellationReason: cancellationReason
                         });
                     }
                 }
@@ -349,7 +410,6 @@
         }
 
         function generateExpectedBlockSlots(semesterStart, semesterEnd, checkDates = []) {
-            // 1. Gather all raw block dates in sequence
             const rawBlockDates = [];
             let current = new Date(semesterStart);
 
@@ -366,19 +426,15 @@
                 current.setDate(current.getDate() + 1);
             }
 
-            // 2. Identify and flag 3 block days prior to every check date
             const excludedDatesSet = new Set();
             
             checkDates.forEach(checkDateStr => {
                 const checkTime = new Date(checkDateStr + 'T00:00:00').getTime();
                 const priorBlockDates = rawBlockDates.filter(d => d.getTime() < checkTime);
-                
-                // Get the last 3 block days prior to this check
                 const threePrior = priorBlockDates.slice(-3);
                 threePrior.forEach(d => excludedDatesSet.add(formatDateKey(d)));
             });
 
-            // 3. Build expected slots for non-excluded block days
             const slots = [];
             rawBlockDates.forEach(blockDate => {
                 const dateKey = formatDateKey(blockDate);
@@ -413,6 +469,7 @@
         function displayResults(filename, activities, semStart, semEnd, checkDates) {
             const blockSlots = generateExpectedBlockSlots(semStart, semEnd, checkDates);
             let attendedCount = 0;
+            let studentAbsentCount = 0;
 
             const resultsData = blockSlots.map(slot => {
                 const matchingActivity = activities.find(act => {
@@ -422,11 +479,15 @@
                 });
 
                 const isFulfilled = !!matchingActivity;
+                const isAbsent = matchingActivity && matchingActivity.isStudentAbsent;
+
                 if (isFulfilled) attendedCount++;
+                if (isAbsent) studentAbsentCount++;
 
                 return {
                     slot: slot,
                     fulfilled: isFulfilled,
+                    isAbsent: isAbsent,
                     activity: matchingActivity
                 };
             });
@@ -435,25 +496,39 @@
             const attendancePct = totalSlots > 0 ? Math.round((attendedCount / totalSlots) * 100) : 0;
             
             let html = `<h2>${filename}</h2>`;
-            html += `<div class="attendance">📊 Flight Block Attendance Rate<br><strong>${attendancePct}%</strong><br><small>${attendedCount} / ${totalSlots} scheduled block slots fulfilled (Excl. holidays & 3 pre-check block days)</small></div>`;
+            html += `<div class="attendance">📊 Flight Block Attendance Rate<br><strong>${attendancePct}%</strong><br><small>${attendedCount} / ${totalSlots} scheduled block slots fulfilled (Includes ${studentAbsentCount} "Student Absent" events)</small></div>`;
             html += `<p class="summary">Date range: ${semStart.toLocaleDateString()} – ${semEnd.toLocaleDateString()} | Detected Check Event Dates: ${checkDates.length}</p>`;
             
             if (totalSlots === 0) {
                 html += `<p>No scheduled flight blocks found in this date range.</p>`;
             } else {
-                html += `<table><thead><tr><th>Date</th><th>Scheduled Block</th><th>Block Time</th><th>Activity Completed?</th><th>Matching CSV Activity</th></tr></thead><tbody>`;
+                html += `<table><thead><tr><th>Date</th><th>Scheduled Block</th><th>Block Time</th><th>Activity Status</th><th>Matching CSV Activity</th></tr></thead><tbody>`;
                 resultsData.forEach(item => {
                     const dateStr = item.slot.date.toLocaleDateString();
                     const timeStr = `${item.slot.start.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})} - ${item.slot.end.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`;
+                    
+                    let statusClass = 'no-overlap';
+                    let statusLabel = '❌ NO';
+
+                    if (item.fulfilled) {
+                        if (item.isAbsent) {
+                            statusClass = 'absent';
+                            statusLabel = '⚠️ STUDENT ABSENT';
+                        } else {
+                            statusClass = 'overlap';
+                            statusLabel = '✅ YES';
+                        }
+                    }
+
                     const actDetails = item.activity 
-                        ? `${item.activity.description} (${item.activity.start.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})})` 
+                        ? `${item.activity.description} (${item.activity.start.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})})${item.isAbsent ? ' <span class="badge-absent">Student Absent</span>' : ''}` 
                         : '—';
 
-                    html += `<tr class="${item.fulfilled ? 'overlap' : 'no-overlap'}">
+                    html += `<tr class="${statusClass}">
                         <td>${dateStr}</td>
                         <td>${item.slot.blockName}</td>
                         <td>${timeStr}</td>
-                        <td>${item.fulfilled ? '✅ YES' : '❌ NO'}</td>
+                        <td>${statusLabel}</td>
                         <td>${actDetails}</td>
                     </tr>`;
                 });
@@ -468,7 +543,10 @@
             document.getElementById('results').innerHTML = '';
             document.getElementById('status').innerHTML = '';
             document.getElementById('academicCalendarFile').value = '';
+            document.getElementById('cancellationFile').value = '';
             document.getElementById('calendarStatus').innerText = '';
+            document.getElementById('cancellationStatus').innerText = '';
+            cancellationRecords = [];
         }
 
         window.onload = () => {
