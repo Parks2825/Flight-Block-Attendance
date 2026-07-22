@@ -84,7 +84,6 @@
     <div id="results"></div>
 
     <script>
-        // Initialized as empty with no default blocks
         let flightBlocks = [];
 
         let noClassDates = [
@@ -255,14 +254,45 @@
                 const reader = new FileReader();
                 reader.onload = e => {
                     try {
-                        const activities = parseStudentScheduleCSV(e.target.result);
-                        displayResults(file.name, activities, semesterStart, semesterEnd);
+                        const fileContent = e.target.result;
+                        const checkDates = extractCheckDatesCSV(fileContent);
+                        const activities = parseStudentScheduleCSV(fileContent);
+                        displayResults(file.name, activities, semesterStart, semesterEnd, checkDates);
                     } catch (err) {
                         document.getElementById('status').innerHTML += `<p>Error: ${err.message}</p>`;
                     }
                 };
                 reader.readAsText(file);
             });
+        }
+
+        function extractCheckDatesCSV(csvText) {
+            const lines = csvText.trim().split('\n');
+            const checkDates = [];
+
+            for (let line of lines) {
+                if (!line.includes('2026')) continue;
+                const fields = line.split('","').map(f => f.replace(/^"|"$/g, '').trim());
+                
+                let startStr = null, type = '';
+                for (let f of fields) {
+                    if (/\d{2} \w{3} 2026 \d{2}:\d{2}/.test(f) && !startStr) {
+                        startStr = f;
+                    }
+                    if (f.includes('Academic') || f.includes('Oral') || f.includes('Flight') || f.includes('Check')) type = f;
+                }
+
+                if (startStr && type.toLowerCase().includes('check')) {
+                    const parsedDate = parseFlexibleDate(startStr);
+                    if (parsedDate) {
+                        const dateKey = formatDateKey(parsedDate);
+                        if (!checkDates.includes(dateKey)) {
+                            checkDates.push(dateKey);
+                        }
+                    }
+                }
+            }
+            return checkDates;
         }
 
         function parseStudentScheduleCSV(csvText) {
@@ -318,8 +348,9 @@
             return `${year}-${month}-${day}`;
         }
 
-        function generateExpectedBlockSlots(semesterStart, semesterEnd) {
-            const slots = [];
+        function generateExpectedBlockSlots(semesterStart, semesterEnd, checkDates = []) {
+            // 1. Gather all raw block dates in sequence
+            const rawBlockDates = [];
             let current = new Date(semesterStart);
 
             while (current <= semesterEnd) {
@@ -327,36 +358,60 @@
 
                 if (!noClassDates.includes(dateKey)) {
                     const dayOfWeek = current.getDay();
-
-                    flightBlocks.forEach(block => {
-                        if (block.days.includes(dayOfWeek)) {
-                            const [sh, sm] = block.start.split(':').map(Number);
-                            const [eh, em] = block.end.split(':').map(Number);
-
-                            const blockStart = new Date(current);
-                            blockStart.setHours(sh, sm, 0, 0);
-
-                            const blockEnd = new Date(current);
-                            blockEnd.setHours(eh, em, 0, 0);
-
-                            slots.push({
-                                date: new Date(current),
-                                blockName: block.name,
-                                start: blockStart,
-                                end: blockEnd
-                            });
-                        }
-                    });
+                    const matchesBlock = flightBlocks.some(b => b.days.includes(dayOfWeek));
+                    if (matchesBlock) {
+                        rawBlockDates.push(new Date(current));
+                    }
                 }
-
                 current.setDate(current.getDate() + 1);
             }
+
+            // 2. Identify and flag 3 block days prior to every check date
+            const excludedDatesSet = new Set();
+            
+            checkDates.forEach(checkDateStr => {
+                const checkTime = new Date(checkDateStr + 'T00:00:00').getTime();
+                const priorBlockDates = rawBlockDates.filter(d => d.getTime() < checkTime);
+                
+                // Get the last 3 block days prior to this check
+                const threePrior = priorBlockDates.slice(-3);
+                threePrior.forEach(d => excludedDatesSet.add(formatDateKey(d)));
+            });
+
+            // 3. Build expected slots for non-excluded block days
+            const slots = [];
+            rawBlockDates.forEach(blockDate => {
+                const dateKey = formatDateKey(blockDate);
+                if (excludedDatesSet.has(dateKey)) return;
+
+                const dayOfWeek = blockDate.getDay();
+
+                flightBlocks.forEach(block => {
+                    if (block.days.includes(dayOfWeek)) {
+                        const [sh, sm] = block.start.split(':').map(Number);
+                        const [eh, em] = block.end.split(':').map(Number);
+
+                        const blockStart = new Date(blockDate);
+                        blockStart.setHours(sh, sm, 0, 0);
+
+                        const blockEnd = new Date(blockDate);
+                        blockEnd.setHours(eh, em, 0, 0);
+
+                        slots.push({
+                            date: new Date(blockDate),
+                            blockName: block.name,
+                            start: blockStart,
+                            end: blockEnd
+                        });
+                    }
+                });
+            });
 
             return slots;
         }
 
-        function displayResults(filename, activities, semStart, semEnd) {
-            const blockSlots = generateExpectedBlockSlots(semStart, semEnd);
+        function displayResults(filename, activities, semStart, semEnd, checkDates) {
+            const blockSlots = generateExpectedBlockSlots(semStart, semEnd, checkDates);
             let attendedCount = 0;
 
             const resultsData = blockSlots.map(slot => {
@@ -380,8 +435,8 @@
             const attendancePct = totalSlots > 0 ? Math.round((attendedCount / totalSlots) * 100) : 0;
             
             let html = `<h2>${filename}</h2>`;
-            html += `<div class="attendance">📊 Flight Block Attendance Rate<br><strong>${attendancePct}%</strong><br><small>${attendedCount} / ${totalSlots} scheduled block slots fulfilled (excluding holidays/breaks)</small></div>`;
-            html += `<p class="summary">Date range: ${semStart.toLocaleDateString()} – ${semEnd.toLocaleDateString()}</p>`;
+            html += `<div class="attendance">📊 Flight Block Attendance Rate<br><strong>${attendancePct}%</strong><br><small>${attendedCount} / ${totalSlots} scheduled block slots fulfilled (Excl. holidays & 3 pre-check block days)</small></div>`;
+            html += `<p class="summary">Date range: ${semStart.toLocaleDateString()} – ${semEnd.toLocaleDateString()} | Detected Check Event Dates: ${checkDates.length}</p>`;
             
             if (totalSlots === 0) {
                 html += `<p>No scheduled flight blocks found in this date range.</p>`;
