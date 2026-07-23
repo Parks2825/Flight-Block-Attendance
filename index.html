@@ -225,6 +225,11 @@
                 `✔ Loaded Uploaded Calendar: Start (${document.getElementById('semesterStart').value}), End (${document.getElementById('semesterEnd').value}), ${noClassDates.length} "no class" dates detected.`;
         }
 
+        function isOralNormalEntry(str) {
+            const normalized = str.toLowerCase().replace(/\s+/g, '');
+            return normalized.includes('oral-normal') || normalized.includes('oral/normal');
+        }
+
         function handleCancellationFile(input) {
             const file = input.files[0];
             if (!file) return;
@@ -244,8 +249,9 @@
                     if (!Array.isArray(row)) return;
 
                     let rowText = row.map(cell => String(cell || '')).join(' ');
-                    // Skip Oral - Normal entries
-                    if (rowText.includes('Oral - Normal') || rowText.includes('Oral')) return;
+
+                    // STRICT EXCLUSION: Skip ONLY cancelled 'Oral / Normal' or 'Oral - Normal'
+                    if (isOralNormalEntry(rowText)) return;
 
                     let dateVal = '';
                     let colY_Reason = '';
@@ -285,7 +291,7 @@
                 });
 
                 document.getElementById('cancellationStatus').innerText = 
-                    `✔ Loaded ${cancellationRecords.length} cancellation record(s) (Excludes Oral/Normal brief room entries).`;
+                    `✔ Loaded ${cancellationRecords.length} cancellation record(s) (Excludes strictly 'Oral / Normal' cancelled activities).`;
             };
             reader.readAsArrayBuffer(file);
         }
@@ -467,8 +473,8 @@
                 let lineStr = fields.join(' ');
                 if (!/\d{4}/.test(lineStr)) continue;
 
-                // Explicit Exclusion: Exclude "Academic" and "Oral - Normal" / Brief Room events
-                if (lineStr.includes('Academic') || lineStr.includes('Oral - Normal') || lineStr.includes('Oral')) continue;
+                // EXCLUSION: Strictly filter out ONLY 'Oral / Normal' or 'Oral - Normal'
+                if (isOralNormalEntry(lineStr)) continue;
                 
                 let startStr = null, endStr = null, type = '', status = '', reasonStr = '';
                 
@@ -485,7 +491,7 @@
                         if (!startStr) startStr = strF;
                         else if (!endStr) endStr = strF;
                     }
-                    if (strF.includes('Flight') || strF.includes('Check') || strF.includes('Dual') || strF.includes('Solo')) type = strF;
+                    if (strF.includes('Flight') || strF.includes('Check') || strF.includes('Dual') || strF.includes('Solo') || strF.includes('Academic') || strF.includes('Oral')) type = strF;
                     if (['Completed','Cancelled','Scheduled'].includes(strF)) status = strF;
                     if (!reasonStr && (strF.toLowerCase().includes('reason') || strF.toLowerCase().includes('absent') || strF.toLowerCase().includes('weather') || strF.toLowerCase().includes('maintenance'))) {
                         reasonStr = strF;
@@ -624,7 +630,7 @@
             
             let html = `<h2>${filename}</h2>`;
             html += `<div class="attendance">📊 Flight Block Attendance Rate<br><strong>${attendancePct}%</strong><br><small>${attendedCount} / ${totalSlots} scheduled block slots fulfilled (${studentAbsentCount} marked "Student Absent")</small></div>`;
-            html += `<p class="summary">Date range: ${semStart.toLocaleDateString()} – ${semEnd.toLocaleDateString()} | Detected Check Events: ${checkDates.length} | Active Exclusions: Academic Activities, Oral/Normal Briefing Sessions, No-Class Calendar Days, & 3 Pre-Check Block Days</p>`;
+            html += `<p class="summary">Date range: ${semStart.toLocaleDateString()} – ${semEnd.toLocaleDateString()} | Detected Check Events: ${checkDates.length} | Active Exclusions: Cancelled "Oral / Normal" Activities, No-Class Calendar Days, & 3 Pre-Check Block Days</p>`;
             
             if (totalSlots === 0) {
                 html += `<p>No scheduled flight blocks found in this date range.</p>`;
