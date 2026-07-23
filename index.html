@@ -235,20 +235,45 @@
                 const workbook = XLSX.read(data, { type: 'array' });
                 const firstSheetName = workbook.SheetNames[0];
                 const worksheet = workbook.Sheets[firstSheetName];
-                const json = XLSX.utils.sheet_to_json(worksheet);
+                
+                // Read as 2D array to accurately target Column Y (Index 24) & Column AC (Index 28)
+                const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
-                cancellationRecords = json.map(row => {
-                    const reason = String(row.Reason || row.reason || row['Cancellation Reason'] || row.Remarks || '').trim();
-                    const dateVal = String(row.Date || row.date || row['Start Time'] || '').trim();
+                cancellationRecords = [];
+
+                rows.forEach(row => {
+                    if (!Array.isArray(row) || row.length < 19) return;
+
+                    // Date usually in Col 18 (S / Activity Start) or earlier field containing a date string
+                    const dateVal = String(row[18] || row[0] || '').trim();
                     const parsedDate = parseFlexibleDate(dateVal);
-                    
-                    return {
-                        dateKey: parsedDate ? formatDateKey(parsedDate) : null,
+
+                    // Column Y (Index 24) = Reason Category
+                    const colY_Reason = String(row[24] || '').trim();
+                    // Column AC (Index 28) = Cancellation Comment
+                    const colAC_Comment = String(row[28] || '').trim();
+
+                    if (!parsedDate || (!colY_Reason && !colAC_Comment)) return;
+
+                    let combinedReason = '';
+                    if (colY_Reason && colAC_Comment) {
+                        combinedReason = `${colY_Reason} - ${colAC_Comment}`;
+                    } else {
+                        combinedReason = colY_Reason || colAC_Comment;
+                    }
+
+                    const combinedLower = combinedReason.toLowerCase();
+                    const isStudentAbsent = combinedLower.includes('student absent') || combinedLower.includes('absent');
+
+                    cancellationRecords.push({
+                        dateKey: formatDateKey(parsedDate),
                         rawDate: dateVal,
-                        reason: reason,
-                        isStudentAbsent: reason.toLowerCase().includes('student absent')
-                    };
-                }).filter(item => item.reason.length > 0);
+                        reasonCategory: colY_Reason,
+                        comment: colAC_Comment,
+                        reason: combinedReason,
+                        isStudentAbsent: isStudentAbsent
+                    });
+                });
 
                 const absentCount = cancellationRecords.filter(r => r.isStudentAbsent).length;
                 document.getElementById('cancellationStatus').innerText = 
@@ -420,6 +445,14 @@
                 
                 let startStr = null, endStr = null, type = '', status = '', reasonStr = '';
                 
+                // Extract directly from index 24 (Col Y) and index 28 (Col AC) if array is long enough
+                if (fields.length > 28) {
+                    const colY = fields[24] ? fields[24].trim() : '';
+                    const colAC = fields[28] ? fields[28].trim() : '';
+                    if (colY && colAC) reasonStr = `${colY} - ${colAC}`;
+                    else reasonStr = colY || colAC;
+                }
+
                 for (let f of fields) {
                     if (/\d{2} \w{3} \d{4} \d{2}:\d{2}/.test(f)) {
                         if (!startStr) startStr = f;
@@ -427,7 +460,7 @@
                     }
                     if (f.includes('Academic') || f.includes('Oral') || f.includes('Flight') || f.includes('Check')) type = f;
                     if (['Completed','Cancelled','Scheduled'].includes(f)) status = f;
-                    if (f.toLowerCase().includes('reason') || f.toLowerCase().includes('absent') || f.toLowerCase().includes('weather') || f.toLowerCase().includes('maintenance')) {
+                    if (!reasonStr && (f.toLowerCase().includes('reason') || f.toLowerCase().includes('absent') || f.toLowerCase().includes('weather') || f.toLowerCase().includes('maintenance'))) {
                         reasonStr = f;
                     }
                 }
@@ -440,14 +473,14 @@
                     const end = endStr ? parseFlexibleDate(endStr) : null;
                     const dateKey = start ? formatDateKey(start) : null;
 
-                    let isStudentAbsent = reasonStr.toLowerCase().includes('student absent');
+                    let isStudentAbsent = reasonStr.toLowerCase().includes('student absent') || reasonStr.toLowerCase().includes('absent');
                     let cancellationReason = reasonStr;
 
                     if (dateKey) {
                         const match = cancellationRecords.find(c => c.dateKey === dateKey);
                         if (match) {
                             if (match.isStudentAbsent) isStudentAbsent = true;
-                            if (!cancellationReason) cancellationReason = match.reason;
+                            if (match.reason) cancellationReason = match.reason;
                         }
                     }
 
@@ -507,7 +540,7 @@
                 threePrior.forEach(d => excludedDatesSet.add(formatDateKey(d)));
             });
 
-            // Step 3: Build the required block slot list, omitting excluded pre-check dates
+            // Step 3: Build required block slot list, omitting excluded pre-check dates
             const slots = [];
             rawBlockDates.forEach(blockDate => {
                 const dateKey = formatDateKey(blockDate);
@@ -582,7 +615,7 @@
                     <th>Block Fulfilled?</th>
                     <th>CSV Activity</th>
                     <th>Activity Status</th>
-                    <th>Cancellation Reason</th>
+                    <th>Cancellation Reason (Col Y & AC)</th>
                 </tr></thead><tbody>`;
 
                 resultsData.forEach(item => {
