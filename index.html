@@ -73,20 +73,26 @@
                 <option value="summer2026">USU Summer Semester 2026</option>
                 <option value="fall2026">USU Fall Semester 2026</option>
                 <option value="spring2027">USU Spring Semester 2027</option>
-                <option value="custom">Custom Date Range</option>
+                <option value="custom">Custom Date Range (Upload Calendar)</option>
             </select>
             <span id="semesterDataBadge" style="margin-left: 10px; font-size: 0.9em; color: #555;"></span>
         </div>
 
         <div class="file-inputs">
             <div class="file-input-group">
-                <label><strong>1. Cancellation Reasons Log (.xlsx, .xls, .csv):</strong><br>
+                <label><strong>1. Academic Calendar File (Optional if USU Semester is selected):</strong><br>
+                <input type="file" id="academicCalendarFile" accept=".xlsx, .xls, .csv" onchange="handleAcademicCalendar(this)"></label>
+                <div id="calendarStatus" class="status-msg"></div>
+            </div>
+
+            <div class="file-input-group">
+                <label><strong>2. Cancellation Reasons Log (.xlsx, .xls, .csv):</strong><br>
                 <input type="file" id="cancellationFile" accept=".xlsx, .xls, .csv" onchange="handleCancellationFile(this)"></label>
                 <div id="cancellationStatus" class="status-msg"></div>
             </div>
 
             <div class="file-input-group">
-                <label><strong>2. Flight Activity Logs (CSV):</strong><br>
+                <label><strong>3. Flight Activity Logs (CSV):</strong><br>
                 <input type="file" id="csvFile" accept=".csv" multiple></label>
             </div>
         </div>
@@ -104,13 +110,47 @@
     <script>
         let flightBlocks = [];
         let cancellationRecords = [];
+        let noClassDates = [];
 
-        // Built-in Utah State University (USU) Academic Semester Start/End Dates
+        // Built-in Utah State University (USU) Academic Calendar Database
         const usuSemesters = {
-            spring2026: { start: '2026-01-05', end: '2026-04-21' },
-            summer2026: { start: '2026-05-04', end: '2026-08-07' },
-            fall2026:   { start: '2026-08-31', end: '2026-12-11' },
-            spring2027: { start: '2027-01-11', end: '2027-04-27' }
+            spring2026: {
+                start: '2026-01-05',
+                end: '2026-04-21',
+                noClass: [
+                    '2026-01-19', // MLK Jr. Day
+                    '2026-02-16', // Presidents' Day
+                    '2026-03-09', '2026-03-10', '2026-03-11', '2026-03-12', '2026-03-13' // Spring Break
+                ]
+            },
+            summer2026: {
+                start: '2026-05-04',
+                end: '2026-08-07',
+                noClass: [
+                    '2026-05-25', // Memorial Day
+                    '2026-06-15', // Juneteenth
+                    '2026-07-03', // Independence Day
+                    '2026-07-24'  // Pioneer Day
+                ]
+            },
+            fall2026: {
+                start: '2026-08-31',
+                end: '2026-12-11',
+                noClass: [
+                    '2026-09-07', // Labor Day
+                    '2026-10-09', // Fall Break
+                    '2026-11-25', '2026-11-26', '2026-11-27' // Thanksgiving Holiday
+                ]
+            },
+            spring2027: {
+                start: '2027-01-11',
+                end: '2027-04-27',
+                noClass: [
+                    '2027-01-18', // MLK Jr. Day
+                    '2027-02-15', // Presidents' Day
+                    '2027-03-08', '2027-03-09', '2027-03-10', '2027-03-11', '2027-03-12' // Spring Break
+                ]
+            }
         };
 
         function loadUSUSemesterData() {
@@ -118,7 +158,7 @@
             const badge = document.getElementById('semesterDataBadge');
 
             if (selectedKey === 'custom') {
-                badge.innerHTML = '<em>Custom date range selected.</em>';
+                badge.innerHTML = '<em>Custom dates enabled. Upload calendar or enter manually.</em>';
                 return;
             }
 
@@ -126,8 +166,63 @@
             if (semData) {
                 document.getElementById('semesterStart').value = semData.start;
                 document.getElementById('semesterEnd').value = semData.end;
-                badge.innerHTML = `✔ Loaded preset range: <strong>${semData.start}</strong> to <strong>${semData.end}</strong>`;
+                noClassDates = [...semData.noClass];
+                badge.innerHTML = `✔ Loaded preset: <strong>${semData.start}</strong> to <strong>${semData.end}</strong> (${noClassDates.length} "no class" dates).`;
             }
+        }
+
+        function handleAcademicCalendar(input) {
+            const file = input.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                const json = XLSX.utils.sheet_to_json(worksheet);
+
+                parseAcademicCalendarData(json);
+                document.getElementById('usuSemesterSelect').value = 'custom';
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function parseAcademicCalendarData(data) {
+            let parsedNoClassDates = [];
+            const currentYear = 2026;
+
+            data.forEach(row => {
+                const title = String(row.Title || row.title || row.Event || '').trim();
+                const dateStr = String(row.Date || row.date || '').trim();
+
+                if (title.toLowerCase().includes('first day of classes')) {
+                    const parsedStart = parseCalendarDate(dateStr, currentYear);
+                    if (parsedStart) {
+                        document.getElementById('semesterStart').value = parsedStart;
+                    }
+                }
+
+                if (title.toLowerCase().includes('last day of classes')) {
+                    const parsedEnd = parseCalendarDate(dateStr, currentYear);
+                    if (parsedEnd) {
+                        document.getElementById('semesterEnd').value = parsedEnd;
+                    }
+                }
+
+                if (title.toLowerCase().includes('no class')) {
+                    const dates = extractDatesFromRange(dateStr, currentYear);
+                    parsedNoClassDates.push(...dates);
+                }
+            });
+
+            if (parsedNoClassDates.length > 0) {
+                noClassDates = parsedNoClassDates;
+            }
+
+            document.getElementById('calendarStatus').innerText = 
+                `✔ Loaded Uploaded Calendar: Start (${document.getElementById('semesterStart').value}), End (${document.getElementById('semesterEnd').value}), ${noClassDates.length} "no class" dates detected.`;
         }
 
         function handleCancellationFile(input) {
@@ -160,6 +255,44 @@
                     `✔ Loaded ${cancellationRecords.length} cancellation record(s) (${absentCount} flagged as "Student Absent").`;
             };
             reader.readAsArrayBuffer(file);
+        }
+
+        function parseCalendarDate(str, year) {
+            const cleanStr = str.replace(/[\u00A0\s]+/g, ' ').trim();
+            const dateObj = new Date(`${cleanStr} ${year}`);
+            if (!isNaN(dateObj.getTime())) {
+                return dateObj.toISOString().split('T')[0];
+            }
+            return null;
+        }
+
+        function extractDatesFromRange(dateStr, year) {
+            const cleanStr = dateStr.replace(/[\u00A0\s]+/g, ' ').trim();
+            const dates = [];
+
+            if (cleanStr.includes('-')) {
+                const parts = cleanStr.split('-').map(s => s.trim());
+                const startMatch = parts[0].match(/([A-Za-z]+)\s+(\d+)/);
+                
+                if (startMatch) {
+                    const month = startMatch[1];
+                    const startDay = parseInt(startMatch[2]);
+                    const endDayMatch = parts[1].match(/\d+/);
+                    const endDay = endDayMatch ? parseInt(endDayMatch[0]) : startDay;
+
+                    for (let d = startDay; d <= endDay; d++) {
+                        const dateObj = new Date(`${month} ${d} ${year}`);
+                        if (!isNaN(dateObj.getTime())) {
+                            dates.push(dateObj.toISOString().split('T')[0]);
+                        }
+                    }
+                }
+            } else {
+                const singleDate = parseCalendarDate(cleanStr, year);
+                if (singleDate) dates.push(singleDate);
+            }
+
+            return dates;
         }
 
         function renderFlightBlocks() {
@@ -236,14 +369,44 @@
                 reader.onload = e => {
                     try {
                         const fileContent = e.target.result;
+                        const checkDates = extractCheckDatesCSV(fileContent);
                         const activities = parseStudentScheduleCSV(fileContent);
-                        displayResults(file.name, activities, semesterStart, semesterEnd);
+                        displayResults(file.name, activities, semesterStart, semesterEnd, checkDates);
                     } catch (err) {
                         document.getElementById('status').innerHTML += `<p>Error: ${err.message}</p>`;
                     }
                 };
                 reader.readAsText(file);
             });
+        }
+
+        function extractCheckDatesCSV(csvText) {
+            const lines = csvText.trim().split('\n');
+            const checkDates = [];
+
+            for (let line of lines) {
+                if (!/\d{4}/.test(line)) continue;
+                const fields = line.split('","').map(f => f.replace(/^"|"$/g, '').trim());
+                
+                let startStr = null, type = '';
+                for (let f of fields) {
+                    if (/\d{2} \w{3} \d{4} \d{2}:\d{2}/.test(f) && !startStr) {
+                        startStr = f;
+                    }
+                    if (f.includes('Academic') || f.includes('Oral') || f.includes('Flight') || f.includes('Check')) type = f;
+                }
+
+                if (startStr && type.toLowerCase().includes('check')) {
+                    const parsedDate = parseFlexibleDate(startStr);
+                    if (parsedDate) {
+                        const dateKey = formatDateKey(parsedDate);
+                        if (!checkDates.includes(dateKey)) {
+                            checkDates.push(dateKey);
+                        }
+                    }
+                }
+            }
+            return checkDates;
         }
 
         function parseStudentScheduleCSV(csvText) {
@@ -269,7 +432,7 @@
                     }
                 }
                 
-                // ONLY EXCLUDE activities categorized as Academic
+                // EXCLUDE activities categorized as Academic
                 if (type.toLowerCase().includes('academic')) continue;
                 
                 if (startStr) {
@@ -316,40 +479,68 @@
             return `${year}-${month}-${day}`;
         }
 
-        function generateExpectedBlockSlots(semesterStart, semesterEnd) {
-            const slots = [];
+        function generateExpectedBlockSlots(semesterStart, semesterEnd, checkDates = []) {
+            const rawBlockDates = [];
             let current = new Date(semesterStart);
 
+            // Step 1: Collect valid block dates (excluding Holiday/No-Class dates)
             while (current <= semesterEnd) {
-                const dayOfWeek = current.getDay();
+                const dateKey = formatDateKey(current);
+
+                if (!noClassDates.includes(dateKey)) {
+                    const dayOfWeek = current.getDay();
+                    const matchesBlock = flightBlocks.some(b => b.days.includes(dayOfWeek));
+                    if (matchesBlock) {
+                        rawBlockDates.push(new Date(current));
+                    }
+                }
+                current.setDate(current.getDate() + 1);
+            }
+
+            // Step 2: Calculate and exclude the 3 scheduled block days prior to each Check ride
+            const excludedDatesSet = new Set();
+            
+            checkDates.forEach(checkDateStr => {
+                const checkTime = new Date(checkDateStr + 'T00:00:00').getTime();
+                const priorBlockDates = rawBlockDates.filter(d => d.getTime() < checkTime);
+                const threePrior = priorBlockDates.slice(-3);
+                threePrior.forEach(d => excludedDatesSet.add(formatDateKey(d)));
+            });
+
+            // Step 3: Build the required block slot list, omitting excluded pre-check dates
+            const slots = [];
+            rawBlockDates.forEach(blockDate => {
+                const dateKey = formatDateKey(blockDate);
+                if (excludedDatesSet.has(dateKey)) return;
+
+                const dayOfWeek = blockDate.getDay();
 
                 flightBlocks.forEach(block => {
                     if (block.days.includes(dayOfWeek)) {
                         const [sh, sm] = block.start.split(':').map(Number);
                         const [eh, em] = block.end.split(':').map(Number);
 
-                        const blockStart = new Date(current);
+                        const blockStart = new Date(blockDate);
                         blockStart.setHours(sh, sm, 0, 0);
 
-                        const blockEnd = new Date(current);
+                        const blockEnd = new Date(blockDate);
                         blockEnd.setHours(eh, em, 0, 0);
 
                         slots.push({
-                            date: new Date(current),
+                            date: new Date(blockDate),
                             blockName: block.name,
                             start: blockStart,
                             end: blockEnd
                         });
                     }
                 });
-                current.setDate(current.getDate() + 1);
-            }
+            });
 
             return slots;
         }
 
-        function displayResults(filename, activities, semStart, semEnd) {
-            const blockSlots = generateExpectedBlockSlots(semStart, semEnd);
+        function displayResults(filename, activities, semStart, semEnd, checkDates) {
+            const blockSlots = generateExpectedBlockSlots(semStart, semEnd, checkDates);
             let attendedCount = 0;
             let studentAbsentCount = 0;
 
@@ -379,7 +570,7 @@
             
             let html = `<h2>${filename}</h2>`;
             html += `<div class="attendance">📊 Flight Block Attendance Rate<br><strong>${attendancePct}%</strong><br><small>${attendedCount} / ${totalSlots} scheduled block slots fulfilled (${studentAbsentCount} marked "Student Absent")</small></div>`;
-            html += `<p class="summary">Date range: ${semStart.toLocaleDateString()} – ${semEnd.toLocaleDateString()} | Active Exclusion: Academic Activities Only</p>`;
+            html += `<p class="summary">Date range: ${semStart.toLocaleDateString()} – ${semEnd.toLocaleDateString()} | Detected Check Events: ${checkDates.length} | Active Exclusions: Academic Activities, No-Class Calendar Days, & 3 Pre-Check Block Days</p>`;
             
             if (totalSlots === 0) {
                 html += `<p>No scheduled flight blocks found in this date range.</p>`;
@@ -447,7 +638,9 @@
         function clearResults() {
             document.getElementById('results').innerHTML = '';
             document.getElementById('status').innerHTML = '';
+            document.getElementById('academicCalendarFile').value = '';
             document.getElementById('cancellationFile').value = '';
+            document.getElementById('calendarStatus').innerText = '';
             document.getElementById('cancellationStatus').innerText = '';
             cancellationRecords = [];
             loadUSUSemesterData();
