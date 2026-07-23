@@ -28,7 +28,9 @@
         .file-inputs { display: flex; flex-direction: column; gap: 10px; margin: 15px 0; }
         .file-input-group { background: #fdfdfd; padding: 10px; border: 1px dashed #ccc; border-radius: 4px; }
         .status-msg { margin-top: 5px; font-weight: bold; color: #2e7d32; }
-        .badge-absent { background: #ffc107; color: #000; padding: 3px 6px; border-radius: 4px; font-size: 0.85em; }
+        .badge-absent { background: #ffc107; color: #000; padding: 3px 6px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
+        .badge-cancelled { background: #dc3545; color: #fff; padding: 3px 6px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
+        .badge-completed { background: #198754; color: #fff; padding: 3px 6px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
         .semester-picker-box { background: #eef6ff; border: 1px solid #b6d4fe; padding: 12px; border-radius: 6px; margin-bottom: 15px; }
     </style>
 </head>
@@ -425,7 +427,7 @@
                     }
                     if (f.includes('Academic') || f.includes('Oral') || f.includes('Flight') || f.includes('Check')) type = f;
                     if (['Completed','Cancelled','Scheduled'].includes(f)) status = f;
-                    if (f.toLowerCase().includes('student absent') || f.toLowerCase().includes('cancellation reason')) {
+                    if (f.toLowerCase().includes('reason') || f.toLowerCase().includes('absent') || f.toLowerCase().includes('weather') || f.toLowerCase().includes('maintenance')) {
                         reasonStr = f;
                     }
                 }
@@ -440,14 +442,15 @@
                     let isStudentAbsent = reasonStr.toLowerCase().includes('student absent');
                     let cancellationReason = reasonStr;
 
-                    if (!isStudentAbsent && dateKey) {
-                        const match = cancellationRecords.find(c => c.dateKey === dateKey && c.isStudentAbsent);
+                    // Match against uploaded cancellation log if reason missing in activity row
+                    if (dateKey) {
+                        const match = cancellationRecords.find(c => c.dateKey === dateKey);
                         if (match) {
-                            isStudentAbsent = true;
-                            cancellationReason = match.reason;
+                            if (match.isStudentAbsent) isStudentAbsent = true;
+                            if (!cancellationReason) cancellationReason = match.reason;
                         }
                     }
-                    
+
                     if (status === 'Cancelled' && !isStudentAbsent) continue;
 
                     if (start) {
@@ -457,7 +460,7 @@
                             end: end,
                             status: status || 'Completed',
                             isStudentAbsent: isStudentAbsent,
-                            cancellationReason: cancellationReason
+                            cancellationReason: cancellationReason || (status === 'Cancelled' ? 'Cancelled (Unspecified)' : '')
                         });
                     }
                 }
@@ -571,34 +574,57 @@
             if (totalSlots === 0) {
                 html += `<p>No scheduled flight blocks found in this date range.</p>`;
             } else {
-                html += `<table><thead><tr><th>Date</th><th>Scheduled Block</th><th>Block Time</th><th>Activity Status</th><th>Matching CSV Activity</th></tr></thead><tbody>`;
+                html += `<table><thead><tr>
+                    <th>Date</th>
+                    <th>Scheduled Block</th>
+                    <th>Block Time</th>
+                    <th>Block Fulfilled?</th>
+                    <th>CSV Activity</th>
+                    <th>Activity Status</th>
+                    <th>Cancellation Reason</th>
+                </tr></thead><tbody>`;
+
                 resultsData.forEach(item => {
                     const dateStr = item.slot.date.toLocaleDateString();
                     const timeStr = `${item.slot.start.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})} - ${item.slot.end.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`;
                     
-                    let statusClass = 'no-overlap';
-                    let statusLabel = '❌ NO';
+                    let rowClass = 'no-overlap';
+                    let fulfilledLabel = '❌ NO';
+                    let statusBadge = '—';
+                    let reasonDisplay = '—';
 
                     if (item.fulfilled) {
                         if (item.isAbsent) {
-                            statusClass = 'absent';
-                            statusLabel = '⚠️ STUDENT ABSENT';
+                            rowClass = 'absent';
+                            fulfilledLabel = '⚠️ YES (ABSENT)';
+                            statusBadge = '<span class="badge-cancelled">Cancelled</span>';
+                            reasonDisplay = item.activity.cancellationReason || 'Student Absent';
                         } else {
-                            statusClass = 'overlap';
-                            statusLabel = '✅ YES';
+                            rowClass = 'overlap';
+                            fulfilledLabel = '✅ YES';
+                            const actStatus = item.activity ? item.activity.status : 'Completed';
+                            if (actStatus === 'Cancelled') {
+                                statusBadge = '<span class="badge-cancelled">Cancelled</span>';
+                                reasonDisplay = item.activity.cancellationReason || 'Unspecified';
+                            } else {
+                                statusBadge = '<span class="badge-completed">Completed</span>';
+                                reasonDisplay = 'N/A';
+                            }
                         }
                     }
 
                     const actDetails = item.activity 
-                        ? `${item.activity.description} (${item.activity.start.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})})${item.isAbsent ? ' <span class="badge-absent">Student Absent</span>' : ''}` 
+                        ? `${item.activity.description} (${item.activity.start.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})})` 
                         : '—';
 
-                    html += `<tr class="${statusClass}">
+                    html += `<tr class="${rowClass}">
                         <td>${dateStr}</td>
                         <td>${item.slot.blockName}</td>
                         <td>${timeStr}</td>
-                        <td>${statusLabel}</td>
+                        <td>${fulfilledLabel}</td>
                         <td>${actDetails}</td>
+                        <td>${statusBadge}</td>
+                        <td>${reasonDisplay}</td>
                     </tr>`;
                 });
                 html += `</tbody></table>`;
