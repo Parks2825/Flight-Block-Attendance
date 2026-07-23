@@ -86,7 +86,7 @@
             </div>
 
             <div class="file-input-group">
-                <label><strong>2. Cancellation Reasons Log (.xlsx, .xls, .csv):</strong><br>
+                <label><strong>2. Cancellation Log (.xlsx, .xls, .csv):</strong><br>
                 <input type="file" id="cancellationFile" accept=".xlsx, .xls, .csv" onchange="handleCancellationFile(this)"></label>
                 <div id="cancellationStatus" class="status-msg"></div>
             </div>
@@ -283,9 +283,6 @@
                     cancellationRecords.push({
                         dateKey: formatDateKey(parsedDate),
                         rawDate: dateVal,
-                        reasonCategory: colY_Reason,
-                        comment: colAC_Comment,
-                        reason: combinedReason,
                         isStudentAbsent: isStudentAbsent
                     });
                 });
@@ -504,13 +501,11 @@
                     const dateKey = start ? formatDateKey(start) : null;
 
                     let isStudentAbsent = reasonStr.toLowerCase().includes('student absent') || reasonStr.toLowerCase().includes('absent');
-                    let cancellationReason = reasonStr;
 
                     if (dateKey) {
                         const match = cancellationRecords.find(c => c.dateKey === dateKey);
-                        if (match) {
-                            if (match.isStudentAbsent) isStudentAbsent = true;
-                            if (match.reason) cancellationReason = match.reason;
+                        if (match && match.isStudentAbsent) {
+                            isStudentAbsent = true;
                         }
                     }
 
@@ -520,8 +515,7 @@
                             start: start,
                             end: end,
                             status: status || 'Completed',
-                            isStudentAbsent: isStudentAbsent,
-                            cancellationReason: cancellationReason || (status === 'Cancelled' ? 'Cancelled (Unspecified)' : '')
+                            isStudentAbsent: isStudentAbsent
                         });
                     }
                 }
@@ -642,7 +636,6 @@
                     <th>Block Fulfilled?</th>
                     <th>CSV Activity</th>
                     <th>Activity Status</th>
-                    <th>Cancellation Reason (Col Y & AC)</th>
                 </tr></thead><tbody>`;
 
                 resultsData.forEach(item => {
@@ -652,24 +645,20 @@
                     let rowClass = 'no-overlap';
                     let fulfilledLabel = '❌ NO';
                     let statusBadge = '—';
-                    let reasonDisplay = '—';
 
                     if (item.fulfilled) {
                         if (item.isAbsent) {
                             rowClass = 'absent';
                             fulfilledLabel = '⚠️ YES (ABSENT)';
                             statusBadge = '<span class="badge-cancelled">Cancelled</span>';
-                            reasonDisplay = item.activity.cancellationReason || 'Student Absent';
                         } else {
                             rowClass = 'overlap';
                             fulfilledLabel = '✅ YES';
                             const actStatus = item.activity ? item.activity.status : 'Completed';
                             if (actStatus === 'Cancelled') {
                                 statusBadge = '<span class="badge-cancelled">Cancelled</span>';
-                                reasonDisplay = item.activity.cancellationReason || 'Unspecified';
                             } else {
                                 statusBadge = '<span class="badge-completed">Completed</span>';
-                                reasonDisplay = 'N/A';
                             }
                         }
                     }
@@ -685,7 +674,6 @@
                         <td>${fulfilledLabel}</td>
                         <td>${actDetails}</td>
                         <td>${statusBadge}</td>
-                        <td>${reasonDisplay}</td>
                     </tr>`;
                 });
                 html += `</tbody></table>`;
