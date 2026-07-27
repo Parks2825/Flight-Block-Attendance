@@ -72,26 +72,20 @@
                 <option value="summer2026" selected>USU Summer Semester 2026</option>
                 <option value="fall2026">USU Fall Semester 2026</option>
                 <option value="spring2027">USU Spring Semester 2027</option>
-                <option value="custom">Custom Date Range (Upload Calendar)</option>
+                <option value="custom">Custom Date Range</option>
             </select>
             <span id="semesterDataBadge" style="margin-left: 10px; font-size: 0.9em; color: #555;"></span>
         </div>
 
         <div class="file-inputs">
             <div class="file-input-group">
-                <label><strong>1. Academic Calendar File (.xls, .xlsx):</strong><br>
-                <input type="file" id="academicCalendarFile" accept=".xlsx, .xls" onchange="handleAcademicCalendar(this)"></label>
-                <div id="calendarStatus" class="status-msg"></div>
-            </div>
-
-            <div class="file-input-group">
-                <label><strong>2. Cancellation Log (.xls, .xlsx):</strong><br>
+                <label><strong>1. Cancellation Log (.xls, .xlsx):</strong><br>
                 <input type="file" id="cancellationFile" accept=".xlsx, .xls" onchange="handleCancellationFile(this)"></label>
                 <div id="cancellationStatus" class="status-msg"></div>
             </div>
 
             <div class="file-input-group">
-                <label><strong>3. Flight Activity Logs (.xls, .xlsx):</strong><br>
+                <label><strong>2. Flight Activity Logs (.xls, .xlsx):</strong><br>
                 <input type="file" id="excelFile" accept=".xlsx, .xls" multiple></label>
             </div>
         </div>
@@ -150,7 +144,8 @@
             const badge = document.getElementById('semesterDataBadge');
 
             if (selectedKey === 'custom') {
-                badge.innerHTML = '<em>Custom dates enabled. Upload calendar or enter manually.</em>';
+                noClassDates = [];
+                badge.innerHTML = '<em>Custom dates enabled. Enter start/end dates manually.</em>';
                 return;
             }
 
@@ -161,56 +156,6 @@
                 noClassDates = [...semData.noClass];
                 badge.innerHTML = `✔ Loaded preset: <strong>${semData.start}</strong> to <strong>${semData.end}</strong> (${noClassDates.length} "no class" dates).`;
             }
-        }
-
-        function handleAcademicCalendar(input) {
-            const file = input.files[0];
-            if (!file) return;
-
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const data = new Uint8Array(e.target.result);
-                const workbook = XLSX.read(data, { type: 'array' });
-                const firstSheetName = workbook.SheetNames[0];
-                const worksheet = workbook.Sheets[firstSheetName];
-                const json = XLSX.utils.sheet_to_json(worksheet);
-
-                parseAcademicCalendarData(json);
-                document.getElementById('usuSemesterSelect').value = 'custom';
-            };
-            reader.readAsArrayBuffer(file);
-        }
-
-        function parseAcademicCalendarData(data) {
-            let parsedNoClassDates = [];
-            const currentYear = 2026;
-
-            data.forEach(row => {
-                const title = String(row.Title || row.title || row.Event || '').trim();
-                const dateStr = String(row.Date || row.date || '').trim();
-
-                if (title.toLowerCase().includes('first day of classes')) {
-                    const parsedStart = parseCalendarDate(dateStr, currentYear);
-                    if (parsedStart) document.getElementById('semesterStart').value = parsedStart;
-                }
-
-                if (title.toLowerCase().includes('last day of classes')) {
-                    const parsedEnd = parseCalendarDate(dateStr, currentYear);
-                    if (parsedEnd) document.getElementById('semesterEnd').value = parsedEnd;
-                }
-
-                if (title.toLowerCase().includes('no class')) {
-                    const dates = extractDatesFromRange(dateStr, currentYear);
-                    parsedNoClassDates.push(...dates);
-                }
-            });
-
-            if (parsedNoClassDates.length > 0) {
-                noClassDates = parsedNoClassDates;
-            }
-
-            document.getElementById('calendarStatus').innerText = 
-                `✔ Loaded Uploaded Calendar: Start (${document.getElementById('semesterStart').value}), End (${document.getElementById('semesterEnd').value}), ${noClassDates.length} "no class" dates detected.`;
         }
 
         function isOralNormalEntry(str) {
@@ -273,41 +218,6 @@
                     `✔ Loaded ${cancellationRecords.length} cancellation record(s) from ${file.name} (Excludes strictly 'Oral / Normal' cancelled activities).`;
             };
             reader.readAsArrayBuffer(file);
-        }
-
-        function parseCalendarDate(str, year) {
-            const cleanStr = str.replace(/[\u00A0\s]+/g, ' ').trim();
-            const dateObj = new Date(`${cleanStr} ${year}`);
-            return !isNaN(dateObj.getTime()) ? dateObj.toISOString().split('T')[0] : null;
-        }
-
-        function extractDatesFromRange(dateStr, year) {
-            const cleanStr = dateStr.replace(/[\u00A0\s]+/g, ' ').trim();
-            const dates = [];
-
-            if (cleanStr.includes('-')) {
-                const parts = cleanStr.split('-').map(s => s.trim());
-                const startMatch = parts[0].match(/([A-Za-z]+)\s+(\d+)/);
-                
-                if (startMatch) {
-                    const month = startMatch[1];
-                    const startDay = parseInt(startMatch[2]);
-                    const endDayMatch = parts[1].match(/\d+/);
-                    const endDay = endDayMatch ? parseInt(endDayMatch[0]) : startDay;
-
-                    for (let d = startDay; d <= endDay; d++) {
-                        const dateObj = new Date(`${month} ${d} ${year}`);
-                        if (!isNaN(dateObj.getTime())) {
-                            dates.push(dateObj.toISOString().split('T')[0]);
-                        }
-                    }
-                }
-            } else {
-                const singleDate = parseCalendarDate(cleanStr, year);
-                if (singleDate) dates.push(singleDate);
-            }
-
-            return dates;
         }
 
         function renderFlightBlocks() {
@@ -693,9 +603,7 @@
         function clearResults() {
             document.getElementById('results').innerHTML = '';
             document.getElementById('status').innerHTML = '';
-            document.getElementById('academicCalendarFile').value = '';
             document.getElementById('cancellationFile').value = '';
-            document.getElementById('calendarStatus').innerText = '';
             document.getElementById('cancellationStatus').innerText = '';
             cancellationRecords = [];
             loadUSUSemesterData();
