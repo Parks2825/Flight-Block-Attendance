@@ -470,9 +470,6 @@
                 let lineStr = fields.join(' ');
                 if (!/\d{4}/.test(lineStr)) continue;
 
-                // EXCLUSION: Strictly filter out ONLY 'Oral / Normal' or 'Oral - Normal'
-                if (isOralNormalEntry(lineStr)) continue;
-                
                 let startStr = null, endStr = null, type = '', status = '', reasonStr = '';
                 
                 if (fields.length > 28) {
@@ -488,11 +485,17 @@
                         if (!startStr) startStr = strF;
                         else if (!endStr) endStr = strF;
                     }
-                    if (strF.includes('Flight') || strF.includes('Check') || strF.includes('Dual') || strF.includes('Solo') || strF.includes('Academic') || strF.includes('Oral')) type = strF;
+                    if (strF.includes('Flight') || strF.includes('Check') || strF.includes('Dual') || strF.includes('Solo') || strF.includes('Academic') || strF.includes('Oral') || strF.includes('GND')) type = strF;
                     if (['Completed','Cancelled','Scheduled'].includes(strF)) status = strF;
                     if (!reasonStr && (strF.toLowerCase().includes('reason') || strF.toLowerCase().includes('absent') || strF.toLowerCase().includes('weather') || strF.toLowerCase().includes('maintenance'))) {
                         reasonStr = strF;
                     }
+                }
+
+                // EXCLUSION: Strictly filter out ONLY CANCELLED 'Oral / Normal' or 'Oral - Normal'
+                const isCancelled = status === 'Cancelled' || reasonStr.length > 0;
+                if (isOralNormalEntry(lineStr) && isCancelled) {
+                    continue;
                 }
                 
                 if (startStr) {
