@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Flight Block Comparator</title>
-    <!-- SheetJS library for reading Excel (.xlsx/.xls) and CSV files in browser -->
+    <!-- SheetJS library for reading Excel (.xlsx/.xls) files in browser -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; background: #f9f9f9; }
@@ -79,20 +79,20 @@
 
         <div class="file-inputs">
             <div class="file-input-group">
-                <label><strong>1. Academic Calendar File (Optional if USU Semester is selected):</strong><br>
-                <input type="file" id="academicCalendarFile" accept=".xlsx, .xls, .csv" onchange="handleAcademicCalendar(this)"></label>
+                <label><strong>1. Academic Calendar File (.xls, .xlsx):</strong><br>
+                <input type="file" id="academicCalendarFile" accept=".xlsx, .xls" onchange="handleAcademicCalendar(this)"></label>
                 <div id="calendarStatus" class="status-msg"></div>
             </div>
 
             <div class="file-input-group">
-                <label><strong>2. Cancellation Log (.xlsx, .xls, .csv):</strong><br>
-                <input type="file" id="cancellationFile" accept=".xlsx, .xls, .csv" onchange="handleCancellationFile(this)"></label>
+                <label><strong>2. Cancellation Log (.xls, .xlsx):</strong><br>
+                <input type="file" id="cancellationFile" accept=".xlsx, .xls" onchange="handleCancellationFile(this)"></label>
                 <div id="cancellationStatus" class="status-msg"></div>
             </div>
 
             <div class="file-input-group">
-                <label><strong>3. Flight Activity Logs (CSV or XLS):</strong><br>
-                <input type="file" id="csvFile" accept=".csv, .xlsx, .xls" multiple></label>
+                <label><strong>3. Flight Activity Logs (.xls, .xlsx):</strong><br>
+                <input type="file" id="excelFile" accept=".xlsx, .xls" multiple></label>
             </div>
         </div>
 
@@ -218,7 +218,6 @@
             return normalized.includes('oral-normal') || normalized.includes('oral/normal');
         }
 
-        // UNIFIED LOGIC FOR CSV AND XLS
         function handleCancellationFile(input) {
             const file = input.files[0];
             if (!file) return;
@@ -234,7 +233,6 @@
 
                 cancellationRecords = [];
 
-                // Strict regex matching for activity timestamps (e.g. "11 May 2026 09:00" or "11 May 2026 09:0")
                 const activityTimeRegex = /\b\d{2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{1,2}:\d{1,2}\b/;
 
                 rows.forEach(row => {
@@ -242,12 +240,10 @@
 
                     let rowText = row.map(cell => String(cell || '')).join(' ');
 
-                    // STRICT EXCLUSION: Skip ONLY cancelled 'Oral / Normal' or 'Oral - Normal'
                     if (isOralNormalEntry(rowText)) return;
 
                     let dateVal = '';
 
-                    // Scan cells specifically for valid Activity Start times, skipping header dates like "START DATE:"
                     for (let cellVal of row) {
                         let strVal = String(cellVal || '').trim();
                         if (strVal.toUpperCase().includes('START DATE') || strVal.toUpperCase().includes('STOP DATE')) {
@@ -365,9 +361,9 @@
         }
 
         function processFiles() {
-            const files = document.getElementById('csvFile').files;
+            const files = document.getElementById('excelFile').files;
 
-            if (files.length === 0) return alert('Select Flight Activity file(s)');
+            if (files.length === 0) return alert('Select Flight Activity Excel file(s)');
             if (flightBlocks.length === 0) return alert('Add at least one flight block');
             
             const startInput = document.getElementById('semesterStart').value;
@@ -456,7 +452,6 @@
                     }
                 }
 
-                // EXCLUSION: Strictly filter out ONLY CANCELLED 'Oral / Normal' or 'Oral - Normal'
                 const isCancelled = status === 'Cancelled' || reasonStr.length > 0;
                 if (isOralNormalEntry(lineStr) && isCancelled) {
                     continue;
@@ -601,7 +596,7 @@
                     <th>Scheduled Block</th>
                     <th>Block Time</th>
                     <th>Block Fulfilled?</th>
-                    <th>CSV/XLS Activity</th>
+                    <th>Excel Activity</th>
                     <th>Activity Status</th>
                 </tr></thead><tbody>`;
 
