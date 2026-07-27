@@ -389,8 +389,9 @@
                         const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
                         const checkDates = extractCheckDates(rows);
+                        const nightDualDates = extractNightDualDates(rows);
                         const activities = parseStudentSchedule(rows);
-                        displayResults(file.name, activities, semesterStart, semesterEnd, checkDates);
+                        displayResults(file.name, activities, semesterStart, semesterEnd, checkDates, nightDualDates);
                     } catch (err) {
                         document.getElementById('status').innerHTML += `<p>Error: ${err.message}</p>`;
                     }
@@ -427,6 +428,35 @@
                 }
             }
             return checkDates;
+        }
+
+        function extractNightDualDates(rows) {
+            const nightDualDates = [];
+
+            for (let fields of rows) {
+                if (!Array.isArray(fields)) continue;
+                let lineStr = fields.join(' ');
+                if (!/\d{4}/.test(lineStr)) continue;
+                
+                let startStr = null;
+                for (let f of fields) {
+                    let strF = String(f || '').trim();
+                    if (/\d{2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{2}:\d{2}/.test(strF) && !startStr) {
+                        startStr = strF;
+                    }
+                }
+
+                if (startStr && lineStr.toLowerCase().includes('night dual')) {
+                    const parsedDate = parseFlexibleDate(startStr);
+                    if (parsedDate) {
+                        const dateKey = formatDateKey(parsedDate);
+                        if (!nightDualDates.includes(dateKey)) {
+                            nightDualDates.push(dateKey);
+                        }
+                    }
+                }
+            }
+            return nightDualDates;
         }
 
         function parseStudentSchedule(rows) {
@@ -498,7 +528,7 @@
             return `${year}-${month}-${day}`;
         }
 
-        function generateExpectedBlockSlots(semesterStart, semesterEnd, checkDates = []) {
+        function generateExpectedBlockSlots(semesterStart, semesterEnd, checkDates = [], nightDualDates = []) {
             const rawBlockDates = [];
             let current = new Date(semesterStart);
 
@@ -517,11 +547,20 @@
 
             const excludedDatesSet = new Set();
             
+            // Exclude 3 blocks prior to Check Events
             checkDates.forEach(checkDateStr => {
                 const checkTime = new Date(checkDateStr + 'T00:00:00').getTime();
                 const priorBlockDates = rawBlockDates.filter(d => d.getTime() < checkTime);
                 const threePrior = priorBlockDates.slice(-3);
                 threePrior.forEach(d => excludedDatesSet.add(formatDateKey(d)));
+            });
+
+            // Exclude 1 block prior to Flight / Night Dual Events
+            nightDualDates.forEach(nightDualDateStr => {
+                const nightDualTime = new Date(nightDualDateStr + 'T00:00:00').getTime();
+                const priorBlockDates = rawBlockDates.filter(d => d.getTime() < nightDualTime);
+                const onePrior = priorBlockDates.slice(-1);
+                onePrior.forEach(d => excludedDatesSet.add(formatDateKey(d)));
             });
 
             const slots = [];
@@ -561,8 +600,8 @@
             return slots;
         }
 
-        function displayResults(filename, activities, semStart, semEnd, checkDates) {
-            const blockSlots = generateExpectedBlockSlots(semStart, semEnd, checkDates);
+        function displayResults(filename, activities, semStart, semEnd, checkDates, nightDualDates) {
+            const blockSlots = generateExpectedBlockSlots(semStart, semEnd, checkDates, nightDualDates);
             let attendedCount = 0;
             let studentAbsentCount = 0;
 
@@ -592,7 +631,7 @@
             
             let html = `<h2>${filename}</h2>`;
             html += `<div class="attendance">📊 Flight Block Attendance Rate<br><strong>${attendancePct}%</strong><br><small>${attendedCount} / ${totalSlots} scheduled block slots fulfilled (${studentAbsentCount} marked "Student Absent")</small></div>`;
-            html += `<p class="summary">Date range: ${semStart.toLocaleDateString()} – ${semEnd.toLocaleDateString()} | Detected Check Events: ${checkDates.length} | Active Exclusions: Cancelled "Oral / Normal" Activities, No-Class Calendar Days, First Block of Semester, & 3 Pre-Check Block Days</p>`;
+            html += `<p class="summary">Date range: ${semStart.toLocaleDateString()} – ${semEnd.toLocaleDateString()} | Detected Check Events: ${checkDates.length} | Detected Night Dual Events: ${nightDualDates.length} | Active Exclusions: Cancelled "Oral / Normal" Activities, No-Class Calendar Days, First Block of Semester, 3 Pre-Check Block Days, & 1 Pre-Night Dual Block Day</p>`;
             
             if (totalSlots === 0) {
                 html += `<p>No scheduled flight blocks found in this date range.</p>`;
