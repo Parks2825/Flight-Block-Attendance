@@ -218,7 +218,7 @@
             return normalized.includes('oral-normal') || normalized.includes('oral/normal');
         }
 
-        // UNIFIED LOGIC: Handles both CSV and XLS cancellation logs identically
+        // UNIFIED LOGIC FOR CSV AND XLS
         function handleCancellationFile(input) {
             const file = input.files[0];
             if (!file) return;
@@ -226,7 +226,6 @@
             const reader = new FileReader();
             reader.onload = function(e) {
                 const data = new Uint8Array(e.target.result);
-                // SheetJS parses CSV, XLS, XLSX into a uniform sheet structure
                 const workbook = XLSX.read(data, { type: 'array' });
                 const firstSheetName = workbook.SheetNames[0];
                 const worksheet = workbook.Sheets[firstSheetName];
@@ -234,6 +233,9 @@
                 const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
                 cancellationRecords = [];
+
+                // Strict regex matching for activity timestamps (e.g. "11 May 2026 09:00" or "11 May 2026 09:0")
+                const activityTimeRegex = /\b\d{2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{1,2}:\d{1,2}\b/;
 
                 rows.forEach(row => {
                     if (!Array.isArray(row)) return;
@@ -244,31 +246,25 @@
                     if (isOralNormalEntry(rowText)) return;
 
                     let dateVal = '';
-                    let combinedReason = '';
 
-                    // Find date string and reason/comments across all columns (works for CSV & XLS formats)
-                    row.forEach((cellVal) => {
+                    // Scan cells specifically for valid Activity Start times, skipping header dates like "START DATE:"
+                    for (let cellVal of row) {
                         let strVal = String(cellVal || '').trim();
-                        if (/\d{2}\s+[A-Za-z]{3}\s+\d{4}/.test(strVal) && !dateVal) {
+                        if (strVal.toUpperCase().includes('START DATE') || strVal.toUpperCase().includes('STOP DATE')) {
+                            continue;
+                        }
+                        if (activityTimeRegex.test(strVal) && !dateVal) {
                             dateVal = strVal;
+                            break;
                         }
-                    });
+                    }
 
-                    // Search for reason/comment text
-                    const reasonParts = [];
-                    row.forEach(cellVal => {
-                        let strVal = String(cellVal || '').trim();
-                        if (strVal && !/\d{2}\s+[A-Za-z]{3}\s+\d{4}/.test(strVal) && 
-                            !['ETA', 'Fixed Wing', 'Posted', 'Brief Rooms'].includes(strVal)) {
-                            reasonParts.push(strVal);
-                        }
-                    });
-                    combinedReason = reasonParts.join(' ').toLowerCase();
+                    if (!dateVal) return;
 
                     const parsedDate = parseFlexibleDate(dateVal);
                     if (!parsedDate) return;
 
-                    const isStudentAbsent = combinedReason.includes('student absent') || combinedReason.includes('absent');
+                    const isStudentAbsent = rowText.toLowerCase().includes('student absent') || rowText.toLowerCase().includes('absent');
 
                     cancellationRecords.push({
                         dateKey: formatDateKey(parsedDate),
