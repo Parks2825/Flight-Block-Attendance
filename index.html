@@ -15,7 +15,7 @@
         .overlap { background-color: #ddffdd !important; font-weight: bold; }
         .absent { background-color: #ffcccc !important; font-weight: bold; color: #900000; }
         .no-overlap { background-color: #ffdddd !important; }
-        .controls, .block-manager { margin: 20px 0; padding: 15px; background: white; border: 1px solid #ddd; border-radius: 6px; }
+        .controls, .block-manager, .history-log-box { margin: 20px 0; padding: 15px; background: white; border: 1px solid #ddd; border-radius: 6px; }
         button { margin: 5px; padding: 8px 16px; cursor: pointer; }
         input[type="date"], input[type="time"], input[type="text"], select { padding: 6px; font-size: 0.95em; }
         .checkbox-group { display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0; }
@@ -31,6 +31,13 @@
         .badge-cancelled { background: #dc3545; color: #fff; padding: 3px 6px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
         .badge-completed { background: #198754; color: #fff; padding: 3px 6px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
         .semester-picker-box { background: #eef6ff; border: 1px solid #b6d4fe; padding: 12px; border-radius: 6px; margin-bottom: 15px; }
+        
+        /* Execution Log Styling */
+        .history-log-box { background: #1e1e1e; color: #00ff66; font-family: 'Courier New', Courier, monospace; }
+        .history-log-box h2 { color: #ffffff; border-bottom: 1px solid #444; padding-bottom: 8px; }
+        .log-entry { margin-bottom: 10px; padding: 8px; border-bottom: 1px dashed #444; line-height: 1.5em; }
+        .log-header { font-weight: bold; color: #ffffff; font-size: 1.05em; background: #2a2a2a; padding: 4px 8px; border-radius: 4px; display: inline-block; margin-bottom: 6px; }
+        .log-rate { color: #00e5ff; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -77,6 +84,10 @@
             <span id="semesterDataBadge" style="margin-left: 10px; font-size: 0.9em; color: #555;"></span>
         </div>
 
+        <div style="margin-bottom: 15px;">
+            <label><strong>Student A#:</strong> <input type="text" id="studentAId" placeholder="e.g. A01234567" style="width: 180px;"></label>
+        </div>
+
         <div class="file-inputs">
             <div class="file-input-group">
                 <label><strong>1. Cancellation Log (.xls, .xlsx):</strong><br>
@@ -94,16 +105,26 @@
         <label>Semester End: <input type="date" id="semesterEnd"></label><br><br>
 
         <button onclick="processFiles()">Load Files & Compare</button>
-        <button onclick="clearResults()">Clear</button>
+        <button onclick="clearResults()">Clear Results</button>
     </div>
     
     <div id="status"></div>
     <div id="results"></div>
 
+    <!-- Execution History Log Container -->
+    <div class="history-log-box">
+        <h2>📜 Execution History Log</h2>
+        <button onclick="exportLogToCSV()" style="background:#0066cc; color:#fff; border:none; padding:6px 12px; border-radius:3px; cursor:pointer; font-weight:bold; margin-right:5px;">📥 Export Log (CSV)</button>
+        <button onclick="clearRunHistory()" style="background:#444; color:#fff; border:none; padding:6px 12px; border-radius:3px; cursor:pointer;">Clear History</button>
+        <div id="executionHistoryList" style="margin-top: 10px;"><em>No runs recorded yet in this session.</em></div>
+    </div>
+
     <script>
         let flightBlocks = [];
         let cancellationRecords = [];
         let noClassDates = [];
+        let executionLogData = [];
+        let runCount = 0;
 
         // Built-in Utah State University (USU) Academic Calendar Database
         const usuSemesters = {
@@ -523,7 +544,6 @@
                 });
 
                 const isAbsent = matchingActivity && matchingActivity.isStudentAbsent;
-                // If student is absent, block is NOT fulfilled and counts against attendance
                 const isFulfilled = !!matchingActivity && !isAbsent;
 
                 if (isFulfilled) attendedCount++;
@@ -539,8 +559,9 @@
 
             const totalSlots = blockSlots.length;
             const attendancePct = totalSlots > 0 ? Math.round((attendedCount / totalSlots) * 100) : 0;
+            const studentAId = document.getElementById('studentAId').value.trim() || 'N/A';
             
-            let html = `<h2>${filename}</h2>`;
+            let html = `<h2>${filename} (Student A#: ${studentAId})</h2>`;
             html += `<div class="attendance">📊 Flight Block Attendance Rate<br><strong>${attendancePct}%</strong><br><small>${attendedCount} / ${totalSlots} scheduled block slots fulfilled (${studentAbsentCount} marked "Student Absent" - penalized)</small></div>`;
             html += `<p class="summary">Date range: ${semStart.toLocaleDateString()} – ${semEnd.toLocaleDateString()} | Detected Check Events: ${checkDates.length} | Detected Night Dual Events: ${nightDualDates.length} | Active Exclusions: Cancelled "Oral / Normal" Activities, No-Class Calendar Days, First Block of Semester, 3 Pre-Check Block Days, & 1 Pre-Night Dual Block Day</p>`;
             
@@ -597,6 +618,98 @@
             html += `<hr>`;
             document.getElementById('results').innerHTML += html;
             document.getElementById('status').innerHTML = 'Done.';
+
+            // Log this execution
+            logExecutionRun({
+                studentAId: studentAId,
+                filename: filename,
+                attendancePct: attendancePct,
+                fulfilledCount: attendedCount,
+                totalSlots: totalSlots,
+                studentAbsentCount: studentAbsentCount,
+                checkEventsCount: checkDates.length,
+                nightDualEventsCount: nightDualDates.length,
+                semStart: semStart.toLocaleDateString(),
+                semEnd: semEnd.toLocaleDateString()
+            });
+        }
+
+        function logExecutionRun(logData) {
+            runCount++;
+            const historyContainer = document.getElementById('executionHistoryList');
+            if (runCount === 1) {
+                historyContainer.innerHTML = '';
+            }
+
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const dateStr = now.toLocaleDateString();
+
+            const record = {
+                runNumber: runCount,
+                timestamp: `${dateStr} ${timeStr}`,
+                studentAId: logData.studentAId,
+                attendancePct: `${logData.attendancePct}%`,
+                fulfilled: `${logData.fulfilledCount}/${logData.totalSlots}`,
+                studentAbsences: logData.studentAbsentCount,
+                filename: logData.filename,
+                dateRange: `${logData.semStart} to ${logData.semEnd}`,
+                checkEvents: logData.checkEventsCount,
+                nightDualEvents: logData.nightDualEventsCount
+            };
+
+            executionLogData.push(record);
+
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `
+                <div class="log-header">
+                    ⏱ ${record.timestamp} | Student A#: ${record.studentAId} | Attendance: <span class="log-rate">${record.attendancePct}</span>
+                </div><br>
+                <strong>File:</strong> ${record.filename}<br>
+                <strong>Stats:</strong> ${record.fulfilled} fulfilled blocks (${record.studentAbsences} penalized student absences)<br>
+                <strong>Date Range:</strong> ${record.dateRange} | <strong>Exclusions:</strong> ${record.checkEvents} check events, ${record.nightDualEvents} night dual events
+            `;
+
+            historyContainer.prepend(entry);
+        }
+
+        function exportLogToCSV() {
+            if (executionLogData.length === 0) {
+                return alert('No execution logs recorded yet to export.');
+            }
+
+            const headers = ["Run Number", "Timestamp", "Student A#", "Attendance Rate", "Fulfilled Blocks", "Student Absences", "File Name", "Date Range", "Check Events", "Night Dual Events"];
+            
+            const rows = executionLogData.map(log => [
+                log.runNumber,
+                `"${log.timestamp}"`,
+                `"${log.studentAId}"`,
+                `"${log.attendancePct}"`,
+                `"${log.fulfilled}"`,
+                log.studentAbsences,
+                `"${log.filename}"`,
+                `"${log.dateRange}"`,
+                log.checkEvents,
+                log.nightDualEvents
+            ]);
+
+            const csvContent = "data:text/csv;charset=utf-8," 
+                + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
+
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", `flight_attendance_history_log.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function clearRunHistory() {
+            runCount = 0;
+            executionLogData = [];
+            document.getElementById('executionHistoryList').innerHTML = '<em>No runs recorded yet in this session.</em>';
         }
 
         function clearResults() {
@@ -604,6 +717,7 @@
             document.getElementById('status').innerHTML = '';
             document.getElementById('cancellationFile').value = '';
             document.getElementById('cancellationStatus').innerText = '';
+            document.getElementById('studentAId').value = '';
             cancellationRecords = [];
             loadUSUSemesterData();
         }
