@@ -85,8 +85,8 @@
         </div>
 
         <div style="margin-bottom: 15px;">
-            <label><strong>Student Name Filter:</strong> <input type="text" id="studentName" placeholder="e.g. Jane Doe" style="width: 220px;"></label>
-            <small style="color:#666; margin-left: 8px;">(Required to filter logs)</small>
+            <label><strong>Student Name Filter:</strong> <input type="text" id="studentName" placeholder="e.g. Meyer, A." value="Meyer, A." style="width: 220px;"></label>
+            <small style="color:#666; margin-left: 8px;">(Matches "Student: [Name]" block headers)</small>
         </div>
 
         <div class="file-inputs">
@@ -169,15 +169,17 @@
             }
         }
 
-        // Check if row text matches the entered student name
-        function matchesStudentName(rowText, targetName) {
-            if (!targetName) return true; // If empty, don't filter
-            const cleanText = rowText.toLowerCase();
-            const cleanTarget = targetName.toLowerCase().trim();
-            
-            // Check full name or individual first/last name parts
-            if (cleanText.includes(cleanTarget)) return true;
-            const parts = cleanTarget.split(/\s+/).filter(p => p.length > 2);
+        // Check if current block student matches target input
+        function matchesStudentName(currentStudentText, targetName) {
+            if (!targetName) return true;
+            if (!currentStudentText) return false;
+
+            const cleanText = currentStudentText.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const cleanTarget = targetName.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+            if (cleanText.includes(cleanTarget) || cleanTarget.includes(cleanText)) return true;
+
+            const parts = targetName.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(p => p.length > 0);
             return parts.length > 0 && parts.every(part => cleanText.includes(part));
         }
 
@@ -190,9 +192,10 @@
             const file = input.files[0];
             if (!file) return;
 
-            const studentName = document.getElementById('studentName').value.trim();
-            if (!studentName) {
-                alert('Please enter a Student Name before loading the Cancellation Log.');
+            const targetStudent = document.getElementById('studentName').value.trim();
+            if (!targetStudent) {
+                alert('Please enter a Student Name in the input field first.');
+                return;
             }
 
             const reader = new FileReader();
@@ -203,17 +206,31 @@
                 const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
                 cancellationRecords = [];
+                let currentStudentInFile = ""; 
                 const activityTimeRegex = /\b\d{2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{1,2}:\d{1,2}\b/;
 
                 rows.forEach(row => {
                     if (!Array.isArray(row)) return;
-
                     let rowText = row.map(cell => String(cell || '')).join(' ');
 
-                    // Name Filter & Exclude Oral/Normal
-                    if (!matchesStudentName(rowText, studentName)) return;
+                    // 1. Check for Student Block Header
+                    if (rowText.includes('Student:')) {
+                        let studentPart = rowText.split('Student:')[1];
+                        if (studentPart) {
+                            currentStudentInFile = studentPart.split('/')[0].trim();
+                        }
+                        return; 
+                    }
+
+                    // 2. Filter rows under the current student block
+                    if (!matchesStudentName(currentStudentInFile, targetStudent)) {
+                        return;
+                    }
+
+                    // 3. Skip Oral - Normal cancellations
                     if (isOralNormalEntry(rowText)) return;
 
+                    // 4. Extract Date
                     let dateVal = '';
                     for (let cellVal of row) {
                         let strVal = String(cellVal || '').trim();
@@ -236,7 +253,7 @@
                 });
 
                 document.getElementById('cancellationStatus').innerText = 
-                    `✔ Loaded ${cancellationRecords.length} cancellation record(s) matching "${studentName || 'All Students'}".`;
+                    `✔ Block matched for student! Loaded ${cancellationRecords.length} relevant cancellation record(s).`;
             };
             reader.readAsArrayBuffer(file);
         }
@@ -384,7 +401,6 @@
                 if (!Array.isArray(fields)) continue;
                 let lineStr = fields.join(' ');
 
-                // Name Filter Requirement
                 if (!matchesStudentName(lineStr, studentName)) continue;
                 if (!/\d{4}/.test(lineStr)) continue;
 
