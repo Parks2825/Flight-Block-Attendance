@@ -85,7 +85,8 @@
         </div>
 
         <div style="margin-bottom: 15px;">
-            <label><strong>Student A#:</strong> <input type="text" id="studentAId" placeholder="e.g. A01234567" style="width: 180px;"></label>
+            <label><strong>Student Name Filter:</strong> <input type="text" id="studentName" placeholder="e.g. Jane Doe" style="width: 220px;"></label>
+            <small style="color:#666; margin-left: 8px;">(Required to filter logs)</small>
         </div>
 
         <div class="file-inputs">
@@ -126,37 +127,26 @@
         let executionLogData = [];
         let runCount = 0;
 
-        // Built-in Utah State University (USU) Academic Calendar Database
         const usuSemesters = {
             spring2026: {
                 start: '2026-01-05',
                 end: '2026-04-21',
-                noClass: [
-                    '2026-01-19', '2026-02-16',
-                    '2026-03-09', '2026-03-10', '2026-03-11', '2026-03-12', '2026-03-13'
-                ]
+                noClass: ['2026-01-19', '2026-02-16', '2026-03-09', '2026-03-10', '2026-03-11', '2026-03-12', '2026-03-13']
             },
             summer2026: {
                 start: '2026-05-04',
                 end: '2026-08-07',
-                noClass: [
-                    '2026-05-25', '2026-06-15', '2026-07-03', '2026-07-24'
-                ]
+                noClass: ['2026-05-25', '2026-06-15', '2026-07-03', '2026-07-24']
             },
             fall2026: {
                 start: '2026-08-31',
                 end: '2026-12-11',
-                noClass: [
-                    '2026-09-07', '2026-10-09', '2026-11-25', '2026-11-26', '2026-11-27'
-                ]
+                noClass: ['2026-09-07', '2026-10-09', '2026-11-25', '2026-11-26', '2026-11-27']
             },
             spring2027: {
                 start: '2027-01-11',
                 end: '2027-04-27',
-                noClass: [
-                    '2027-01-18', '2027-02-15',
-                    '2027-03-08', '2027-03-09', '2027-03-10', '2027-03-11', '2027-03-12'
-                ]
+                noClass: ['2027-01-18', '2027-02-15', '2027-03-08', '2027-03-09', '2027-03-10', '2027-03-11', '2027-03-12']
             }
         };
 
@@ -179,6 +169,18 @@
             }
         }
 
+        // Check if row text matches the entered student name
+        function matchesStudentName(rowText, targetName) {
+            if (!targetName) return true; // If empty, don't filter
+            const cleanText = rowText.toLowerCase();
+            const cleanTarget = targetName.toLowerCase().trim();
+            
+            // Check full name or individual first/last name parts
+            if (cleanText.includes(cleanTarget)) return true;
+            const parts = cleanTarget.split(/\s+/).filter(p => p.length > 2);
+            return parts.length > 0 && parts.every(part => cleanText.includes(part));
+        }
+
         function isOralNormalEntry(str) {
             const normalized = str.toLowerCase().replace(/\s+/g, '');
             return normalized.includes('oral-normal') || normalized.includes('oral/normal');
@@ -188,17 +190,19 @@
             const file = input.files[0];
             if (!file) return;
 
+            const studentName = document.getElementById('studentName').value.trim();
+            if (!studentName) {
+                alert('Please enter a Student Name before loading the Cancellation Log.');
+            }
+
             const reader = new FileReader();
             reader.onload = function(e) {
                 const data = new Uint8Array(e.target.result);
                 const workbook = XLSX.read(data, { type: 'array' });
-                const firstSheetName = workbook.SheetNames[0];
-                const worksheet = workbook.Sheets[firstSheetName];
-                
+                const worksheet = workbook.Sheets[workbook.SheetNames[0]];
                 const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
                 cancellationRecords = [];
-
                 const activityTimeRegex = /\b\d{2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{1,2}:\d{1,2}\b/;
 
                 rows.forEach(row => {
@@ -206,15 +210,14 @@
 
                     let rowText = row.map(cell => String(cell || '')).join(' ');
 
+                    // Name Filter & Exclude Oral/Normal
+                    if (!matchesStudentName(rowText, studentName)) return;
                     if (isOralNormalEntry(rowText)) return;
 
                     let dateVal = '';
-
                     for (let cellVal of row) {
                         let strVal = String(cellVal || '').trim();
-                        if (strVal.toUpperCase().includes('START DATE') || strVal.toUpperCase().includes('STOP DATE')) {
-                            continue;
-                        }
+                        if (strVal.toUpperCase().includes('START DATE') || strVal.toUpperCase().includes('STOP DATE')) continue;
                         if (activityTimeRegex.test(strVal) && !dateVal) {
                             dateVal = strVal;
                             break;
@@ -222,21 +225,18 @@
                     }
 
                     if (!dateVal) return;
-
                     const parsedDate = parseFlexibleDate(dateVal);
                     if (!parsedDate) return;
-
-                    const isStudentAbsent = rowText.toLowerCase().includes('student absent');
 
                     cancellationRecords.push({
                         dateKey: formatDateKey(parsedDate),
                         rawDate: dateVal,
-                        isStudentAbsent: isStudentAbsent
+                        isStudentAbsent: rowText.toLowerCase().includes('student absent')
                     });
                 });
 
                 document.getElementById('cancellationStatus').innerText = 
-                    `✔ Loaded ${cancellationRecords.length} cancellation record(s) from ${file.name} (Excludes strictly 'Oral / Normal' cancelled activities).`;
+                    `✔ Loaded ${cancellationRecords.length} cancellation record(s) matching "${studentName || 'All Students'}".`;
             };
             reader.readAsArrayBuffer(file);
         }
@@ -272,14 +272,7 @@
                 return alert('Please select at least one day and set times');
             }
             
-            flightBlocks.push({
-                id: Date.now(),
-                name: name,
-                days: selectedDays,
-                start: start,
-                end: end
-            });
-            
+            flightBlocks.push({ id: Date.now(), name: name, days: selectedDays, start: start, end: end });
             renderFlightBlocks();
             document.getElementById('blockName').value = '';
         }
@@ -293,16 +286,16 @@
 
         function processFiles() {
             const files = document.getElementById('excelFile').files;
+            const studentName = document.getElementById('studentName').value.trim();
 
+            if (!studentName) return alert('Please enter a Student Name to filter the logs.');
             if (files.length === 0) return alert('Select Flight Activity Excel file(s)');
             if (flightBlocks.length === 0) return alert('Add at least one flight block');
             
             const startInput = document.getElementById('semesterStart').value;
             const endInput = document.getElementById('semesterEnd').value;
 
-            if (!startInput || !endInput) {
-                return alert('Please enter both Semester Start and Semester End dates.');
-            }
+            if (!startInput || !endInput) return alert('Please enter both Semester Start and Semester End dates.');
 
             const semesterStart = new Date(startInput + 'T00:00:00');
             const semesterEnd = new Date(endInput + 'T23:59:59');
@@ -319,9 +312,9 @@
                         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
                         const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
-                        const checkDates = extractCheckDates(rows);
-                        const nightDualDates = extractNightDualDates(rows);
-                        const activities = parseStudentSchedule(rows);
+                        const checkDates = extractCheckDates(rows, studentName);
+                        const nightDualDates = extractNightDualDates(rows, studentName);
+                        const activities = parseStudentSchedule(rows, studentName);
                         displayResults(file.name, activities, semesterStart, semesterEnd, checkDates, nightDualDates);
                     } catch (err) {
                         document.getElementById('status').innerHTML += `<p>Error: ${err.message}</p>`;
@@ -331,20 +324,19 @@
             });
         }
 
-        function extractCheckDates(rows) {
+        function extractCheckDates(rows, studentName) {
             const checkDates = [];
-
             for (let fields of rows) {
                 if (!Array.isArray(fields)) continue;
                 let lineStr = fields.join(' ');
+
+                if (!matchesStudentName(lineStr, studentName)) continue;
                 if (!/\d{4}/.test(lineStr)) continue;
                 
                 let startStr = null, type = '';
                 for (let f of fields) {
                     let strF = String(f || '').trim();
-                    if (/\d{2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{2}:\d{2}/.test(strF) && !startStr) {
-                        startStr = strF;
-                    }
+                    if (/\d{2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{2}:\d{2}/.test(strF) && !startStr) startStr = strF;
                     if (strF.includes('Academic') || strF.includes('Oral') || strF.includes('Flight') || strF.includes('Check')) type = strF;
                 }
 
@@ -352,50 +344,48 @@
                     const parsedDate = parseFlexibleDate(startStr);
                     if (parsedDate) {
                         const dateKey = formatDateKey(parsedDate);
-                        if (!checkDates.includes(dateKey)) {
-                            checkDates.push(dateKey);
-                        }
+                        if (!checkDates.includes(dateKey)) checkDates.push(dateKey);
                     }
                 }
             }
             return checkDates;
         }
 
-        function extractNightDualDates(rows) {
+        function extractNightDualDates(rows, studentName) {
             const nightDualDates = [];
-
             for (let fields of rows) {
                 if (!Array.isArray(fields)) continue;
                 let lineStr = fields.join(' ');
+
+                if (!matchesStudentName(lineStr, studentName)) continue;
                 if (!/\d{4}/.test(lineStr)) continue;
                 
                 let startStr = null;
                 for (let f of fields) {
                     let strF = String(f || '').trim();
-                    if (/\d{2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{2}:\d{2}/.test(strF) && !startStr) {
-                        startStr = strF;
-                    }
+                    if (/\d{2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{2}:\d{2}/.test(strF) && !startStr) startStr = strF;
                 }
 
                 if (startStr && lineStr.toLowerCase().includes('night dual')) {
                     const parsedDate = parseFlexibleDate(startStr);
                     if (parsedDate) {
                         const dateKey = formatDateKey(parsedDate);
-                        if (!nightDualDates.includes(dateKey)) {
-                            nightDualDates.push(dateKey);
-                        }
+                        if (!nightDualDates.includes(dateKey)) nightDualDates.push(dateKey);
                     }
                 }
             }
             return nightDualDates;
         }
 
-        function parseStudentSchedule(rows) {
+        function parseStudentSchedule(rows, studentName) {
             const activities = [];
             
             for (let fields of rows) {
                 if (!Array.isArray(fields)) continue;
                 let lineStr = fields.join(' ');
+
+                // Name Filter Requirement
+                if (!matchesStudentName(lineStr, studentName)) continue;
                 if (!/\d{4}/.test(lineStr)) continue;
 
                 let startStr = null, endStr = null, type = '', status = '', reasonStr = '';
@@ -414,9 +404,7 @@
                 }
 
                 const isCancelled = status === 'Cancelled' || reasonStr.length > 0;
-                if (isOralNormalEntry(lineStr) && isCancelled) {
-                    continue;
-                }
+                if (isOralNormalEntry(lineStr) && isCancelled) continue;
                 
                 if (startStr) {
                     const start = parseFlexibleDate(startStr);
@@ -427,9 +415,7 @@
 
                     if (dateKey) {
                         const match = cancellationRecords.find(c => c.dateKey === dateKey);
-                        if (match && match.isStudentAbsent) {
-                            isStudentAbsent = true;
-                        }
+                        if (match && match.isStudentAbsent) isStudentAbsent = true;
                     }
 
                     if (start) {
@@ -465,11 +451,9 @@
 
             while (current <= semesterEnd) {
                 const dateKey = formatDateKey(current);
-
                 if (!noClassDates.includes(dateKey)) {
                     const dayOfWeek = current.getDay();
-                    const matchesBlock = flightBlocks.some(b => b.days.includes(dayOfWeek));
-                    if (matchesBlock) {
+                    if (flightBlocks.some(b => b.days.includes(dayOfWeek))) {
                         rawBlockDates.push(new Date(current));
                     }
                 }
@@ -478,20 +462,16 @@
 
             const excludedDatesSet = new Set();
             
-            // Exclude 3 blocks prior to Check Events
             checkDates.forEach(checkDateStr => {
                 const checkTime = new Date(checkDateStr + 'T00:00:00').getTime();
                 const priorBlockDates = rawBlockDates.filter(d => d.getTime() < checkTime);
-                const threePrior = priorBlockDates.slice(-3);
-                threePrior.forEach(d => excludedDatesSet.add(formatDateKey(d)));
+                priorBlockDates.slice(-3).forEach(d => excludedDatesSet.add(formatDateKey(d)));
             });
 
-            // Exclude 1 block prior to Flight / Night Dual Events
             nightDualDates.forEach(nightDualDateStr => {
                 const nightDualTime = new Date(nightDualDateStr + 'T00:00:00').getTime();
                 const priorBlockDates = rawBlockDates.filter(d => d.getTime() < nightDualTime);
-                const onePrior = priorBlockDates.slice(-1);
-                onePrior.forEach(d => excludedDatesSet.add(formatDateKey(d)));
+                priorBlockDates.slice(-1).forEach(d => excludedDatesSet.add(formatDateKey(d)));
             });
 
             const slots = [];
@@ -500,7 +480,6 @@
                 if (excludedDatesSet.has(dateKey)) return;
 
                 const dayOfWeek = blockDate.getDay();
-
                 flightBlocks.forEach(block => {
                     if (block.days.includes(dayOfWeek)) {
                         const [sh, sm] = block.start.split(':').map(Number);
@@ -512,22 +491,13 @@
                         const blockEnd = new Date(blockDate);
                         blockEnd.setHours(eh, em, 0, 0);
 
-                        slots.push({
-                            date: new Date(blockDate),
-                            blockName: block.name,
-                            start: blockStart,
-                            end: blockEnd
-                        });
+                        slots.push({ date: new Date(blockDate), blockName: block.name, start: blockStart, end: blockEnd });
                     }
                 });
             });
 
-            // Sort chronologically and drop the very first block slot of the semester
             slots.sort((a, b) => a.start - b.start);
-            if (slots.length > 0) {
-                slots.shift();
-            }
-
+            if (slots.length > 0) slots.shift();
             return slots;
         }
 
@@ -549,21 +519,16 @@
                 if (isFulfilled) attendedCount++;
                 if (isAbsent) studentAbsentCount++;
 
-                return {
-                    slot: slot,
-                    fulfilled: isFulfilled,
-                    isAbsent: isAbsent,
-                    activity: matchingActivity
-                };
+                return { slot: slot, fulfilled: isFulfilled, isAbsent: isAbsent, activity: matchingActivity };
             });
 
             const totalSlots = blockSlots.length;
             const attendancePct = totalSlots > 0 ? Math.round((attendedCount / totalSlots) * 100) : 0;
-            const studentAId = document.getElementById('studentAId').value.trim() || 'N/A';
+            const studentName = document.getElementById('studentName').value.trim() || 'All Students';
             
-            let html = `<h2>${filename} (Student A#: ${studentAId})</h2>`;
+            let html = `<h2>${filename} (Student: ${studentName})</h2>`;
             html += `<div class="attendance">📊 Flight Block Attendance Rate<br><strong>${attendancePct}%</strong><br><small>${attendedCount} / ${totalSlots} scheduled block slots fulfilled (${studentAbsentCount} marked "Student Absent" - penalized)</small></div>`;
-            html += `<p class="summary">Date range: ${semStart.toLocaleDateString()} – ${semEnd.toLocaleDateString()} | Detected Check Events: ${checkDates.length} | Detected Night Dual Events: ${nightDualDates.length} | Active Exclusions: Cancelled "Oral / Normal" Activities, No-Class Calendar Days, First Block of Semester, 3 Pre-Check Block Days, & 1 Pre-Night Dual Block Day</p>`;
+            html += `<p class="summary">Date range: ${semStart.toLocaleDateString()} – ${semEnd.toLocaleDateString()} | Filtered Student: "${studentName}" | Check Events: ${checkDates.length} | Night Dual Events: ${nightDualDates.length}</p>`;
             
             if (totalSlots === 0) {
                 html += `<p>No scheduled flight blocks found in this date range.</p>`;
@@ -593,11 +558,7 @@
                         rowClass = 'overlap';
                         fulfilledLabel = '✅ YES';
                         const actStatus = item.activity ? item.activity.status : 'Completed';
-                        if (actStatus === 'Cancelled') {
-                            statusBadge = '<span class="badge-cancelled">Cancelled</span>';
-                        } else {
-                            statusBadge = '<span class="badge-completed">Completed</span>';
-                        }
+                        statusBadge = actStatus === 'Cancelled' ? '<span class="badge-cancelled">Cancelled</span>' : '<span class="badge-completed">Completed</span>';
                     }
 
                     const actDetails = item.activity 
@@ -619,9 +580,8 @@
             document.getElementById('results').innerHTML += html;
             document.getElementById('status').innerHTML = 'Done.';
 
-            // Log this execution
             logExecutionRun({
-                studentAId: studentAId,
+                studentName: studentName,
                 filename: filename,
                 attendancePct: attendancePct,
                 fulfilledCount: attendedCount,
@@ -637,18 +597,13 @@
         function logExecutionRun(logData) {
             runCount++;
             const historyContainer = document.getElementById('executionHistoryList');
-            if (runCount === 1) {
-                historyContainer.innerHTML = '';
-            }
+            if (runCount === 1) historyContainer.innerHTML = '';
 
             const now = new Date();
-            const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-            const dateStr = now.toLocaleDateString();
-
             const record = {
                 runNumber: runCount,
-                timestamp: `${dateStr} ${timeStr}`,
-                studentAId: logData.studentAId,
+                timestamp: `${now.toLocaleDateString()} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`,
+                studentName: logData.studentName,
                 attendancePct: `${logData.attendancePct}%`,
                 fulfilled: `${logData.fulfilledCount}/${logData.totalSlots}`,
                 studentAbsences: logData.studentAbsentCount,
@@ -664,7 +619,7 @@
             entry.className = 'log-entry';
             entry.innerHTML = `
                 <div class="log-header">
-                    ⏱ ${record.timestamp} | Student A#: ${record.studentAId} | Attendance: <span class="log-rate">${record.attendancePct}</span>
+                    ⏱ ${record.timestamp} | Student: ${record.studentName} | Attendance: <span class="log-rate">${record.attendancePct}</span>
                 </div><br>
                 <strong>File:</strong> ${record.filename}<br>
                 <strong>Stats:</strong> ${record.fulfilled} fulfilled blocks (${record.studentAbsences} penalized student absences)<br>
@@ -675,16 +630,13 @@
         }
 
         function exportLogToCSV() {
-            if (executionLogData.length === 0) {
-                return alert('No execution logs recorded yet to export.');
-            }
+            if (executionLogData.length === 0) return alert('No execution logs recorded yet to export.');
 
-            const headers = ["Run Number", "Timestamp", "Student A#", "Attendance Rate", "Fulfilled Blocks", "Student Absences", "File Name", "Date Range", "Check Events", "Night Dual Events"];
-            
+            const headers = ["Run Number", "Timestamp", "Student Name", "Attendance Rate", "Fulfilled Blocks", "Student Absences", "File Name", "Date Range", "Check Events", "Night Dual Events"];
             const rows = executionLogData.map(log => [
                 log.runNumber,
                 `"${log.timestamp}"`,
-                `"${log.studentAId}"`,
+                `"${log.studentName}"`,
                 `"${log.attendancePct}"`,
                 `"${log.fulfilled}"`,
                 log.studentAbsences,
@@ -694,12 +646,9 @@
                 log.nightDualEvents
             ]);
 
-            const csvContent = "data:text/csv;charset=utf-8," 
-                + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
-
-            const encodedUri = encodeURI(csvContent);
+            const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
             const link = document.createElement("a");
-            link.setAttribute("href", encodedUri);
+            link.setAttribute("href", encodeURI(csvContent));
             link.setAttribute("download", `flight_attendance_history_log.csv`);
             document.body.appendChild(link);
             link.click();
@@ -717,7 +666,7 @@
             document.getElementById('status').innerHTML = '';
             document.getElementById('cancellationFile').value = '';
             document.getElementById('cancellationStatus').innerText = '';
-            document.getElementById('studentAId').value = '';
+            document.getElementById('studentName').value = '';
             cancellationRecords = [];
             loadUSUSemesterData();
         }
