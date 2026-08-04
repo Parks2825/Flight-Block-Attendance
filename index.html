@@ -127,6 +127,9 @@
         let executionLogData = [];
         let runCount = 0;
 
+        // Flexible regex to match variations like "Student Absent", "Student - Absent", "STUDENT ABSENT"
+        const ABSENT_REGEX = /student[\s\-_]+absent/i;
+
         const usuSemesters = {
             spring2026: {
                 start: '2026-01-05',
@@ -169,7 +172,6 @@
             }
         }
 
-        // Check if current block student matches target input
         function matchesStudentName(currentStudentText, targetName) {
             if (!targetName) return true;
             if (!currentStudentText) return false;
@@ -211,9 +213,9 @@
 
                 rows.forEach(row => {
                     if (!Array.isArray(row)) return;
-                    let rowText = row.map(cell => String(cell || '')).join(' ');
+                    let rowText = row.map(cell => String(cell || '').trim()).join(' ');
 
-                    // 1. Check for Student Block Header
+                    // Detect Student Section Header
                     if (rowText.includes('Student:')) {
                         let studentPart = rowText.split('Student:')[1];
                         if (studentPart) {
@@ -222,15 +224,14 @@
                         return; 
                     }
 
-                    // 2. Filter rows under the current student block
+                    // Only process rows inside target student's block
                     if (!matchesStudentName(currentStudentInFile, targetStudent)) {
                         return;
                     }
 
-                    // 3. Skip Oral - Normal cancellations
                     if (isOralNormalEntry(rowText)) return;
 
-                    // 4. Extract Date
+                    // Extract start date/time
                     let dateVal = '';
                     for (let cellVal of row) {
                         let strVal = String(cellVal || '').trim();
@@ -248,12 +249,13 @@
                     cancellationRecords.push({
                         dateKey: formatDateKey(parsedDate),
                         rawDate: dateVal,
-                        isStudentAbsent: rowText.toLowerCase().includes('student absent')
+                        isStudentAbsent: ABSENT_REGEX.test(rowText)
                     });
                 });
 
+                const absentCount = cancellationRecords.filter(r => r.isStudentAbsent).length;
                 document.getElementById('cancellationStatus').innerText = 
-                    `✔ Block matched for student! Loaded ${cancellationRecords.length} relevant cancellation record(s).`;
+                    `✔ Loaded ${cancellationRecords.length} record(s) for "${targetStudent}" (${absentCount} flagged as Student Absent).`;
             };
             reader.readAsArrayBuffer(file);
         }
@@ -399,7 +401,7 @@
             
             for (let fields of rows) {
                 if (!Array.isArray(fields)) continue;
-                let lineStr = fields.join(' ');
+                let lineStr = fields.map(f => String(f || '').trim()).join(' ');
 
                 if (!matchesStudentName(lineStr, studentName)) continue;
                 if (!/\d{4}/.test(lineStr)) continue;
@@ -414,7 +416,7 @@
                     }
                     if (strF.includes('Flight') || strF.includes('Check') || strF.includes('Dual') || strF.includes('Solo') || strF.includes('Academic') || strF.includes('Oral') || strF.includes('GND')) type = strF;
                     if (['Completed','Cancelled','Scheduled'].includes(strF)) status = strF;
-                    if (!reasonStr && (strF.toLowerCase().includes('reason') || strF.toLowerCase().includes('absent') || strF.toLowerCase().includes('weather') || strF.toLowerCase().includes('maintenance'))) {
+                    if (!reasonStr && (ABSENT_REGEX.test(strF) || strF.toLowerCase().includes('reason') || strF.toLowerCase().includes('weather') || strF.toLowerCase().includes('maintenance'))) {
                         reasonStr = strF;
                     }
                 }
@@ -427,9 +429,10 @@
                     const end = endStr ? parseFlexibleDate(endStr) : null;
                     const dateKey = start ? formatDateKey(start) : null;
 
-                    let isStudentAbsent = lineStr.toLowerCase().includes('student absent');
+                    // Direct row test OR cross-reference cancellationRecords log
+                    let isStudentAbsent = ABSENT_REGEX.test(lineStr);
 
-                    if (dateKey) {
+                    if (!isStudentAbsent && dateKey) {
                         const match = cancellationRecords.find(c => c.dateKey === dateKey);
                         if (match && match.isStudentAbsent) isStudentAbsent = true;
                     }
@@ -455,6 +458,7 @@
         }
 
         function formatDateKey(dateObj) {
+            if (!dateObj) return '';
             const year = dateObj.getFullYear();
             const month = String(dateObj.getMonth() + 1).padStart(2, '0');
             const day = String(dateObj.getDate()).padStart(2, '0');
