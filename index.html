@@ -372,19 +372,35 @@
                 if (!matchesStudentName(lineStr, studentName)) continue;
                 if (!/\d{4}/.test(lineStr)) continue;
 
-                let startStr = null, endStr = null, type = '', status = '', reasonStr = '';
+                let startStr = null, endStr = null, detectedType = '', status = '', reasonStr = '';
+
+                // Keywords to explicitly match known activity types in Excel columns
+                const activityKeywords = /(flight\s*\/\s*check\s*ride|check\s*ride|dual\s*flight|solo\s*flight|ground\s*school|ground|sim|simulator|stage\s*check|briefing|oral)/i;
 
                 for (let f of fields) {
                     let strF = String(f || '').trim();
+                    
+                    // Match date/time strings
                     if (/\d{1,2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{1,2}:\d{1,2}/.test(strF)) {
                         if (!startStr) startStr = strF;
                         else if (!endStr) endStr = strF;
                     }
+
+                    // Match Activity Status
                     if (['Completed','Cancelled','Scheduled'].includes(strF)) {
                         status = strF;
-                    } else if (strF && !strF.match(/\d{4}/) && strF.length > 2 && !startStr) {
-                        if (!type) type = strF;
+                    } 
+                    
+                    // Explicit pattern match for activity type
+                    if (!detectedType && activityKeywords.test(strF)) {
+                        detectedType = strF;
                     }
+
+                    // Fallback pattern match for non-date text cell
+                    if (!detectedType && strF && !strF.match(/\d{4}/) && strF.length > 2 && !['Completed','Cancelled','Scheduled'].includes(strF) && !strF.toLowerCase().includes('student:')) {
+                        detectedType = strF;
+                    }
+
                     if (!reasonStr && (ABSENT_REGEX.test(strF) || strF.toLowerCase().includes('reason') || strF.toLowerCase().includes('weather') || strF.toLowerCase().includes('maintenance'))) {
                         reasonStr = strF;
                     }
@@ -407,8 +423,8 @@
 
                     if (start) {
                         activities.push({
-                            description: type || 'Scheduled Activity',
-                            activityType: type || 'N/A',
+                            description: detectedType || 'Scheduled Activity',
+                            activityType: detectedType || 'Flight / General',
                             start: start,
                             end: end,
                             status: status || 'Completed',
