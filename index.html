@@ -122,14 +122,14 @@
 
     <script>
         let flightBlocks = [];
-        let rawCancellationRows = null; // Stored unparsed row data from cancellation file
+        let rawCancellationRows = null; 
         let cancellationRecords = [];
         let noClassDates = [];
         let executionLogData = [];
         let runCount = 0;
 
-        // Flexible regex to match variations like "Student Absent", "Student - Absent", "STUDENT ABSENT"
-        const ABSENT_REGEX = /student[\s\-_]+absent/i;
+        // Broadened regex to catch variations of student absence / cancellation reasons
+        const ABSENT_REGEX = /(student[\s\-_]*(absent|absence|no[\s\-]*show|cancel|sick|unexcused)|canceled\s+by\s+student|student\s+canceled)/i;
 
         const usuSemesters = {
             spring2026: {
@@ -191,7 +191,6 @@
             return normalized.includes('oral-normal') || normalized.includes('oral/normal');
         }
 
-        // Reads the file into memory ONCE without processing it against any student filter
         function handleCancellationFile(input) {
             const file = input.files[0];
             if (!file) {
@@ -213,7 +212,6 @@
             reader.readAsArrayBuffer(file);
         }
 
-        // Parses stored cancellation rows specifically for target student on execute
         function parseStoredCancellationData(targetStudent) {
             cancellationRecords = [];
             if (!rawCancellationRows || rawCancellationRows.length === 0) return;
@@ -225,7 +223,6 @@
                 if (!Array.isArray(row)) return;
                 let rowText = row.map(cell => String(cell || '').trim()).join(' ');
 
-                // Detect Student Section Header
                 if (rowText.includes('Student:')) {
                     let studentPart = rowText.split('Student:')[1];
                     if (studentPart) {
@@ -234,14 +231,12 @@
                     return; 
                 }
 
-                // Only process rows inside target student's block
-                if (!matchesStudentName(currentStudentInFile, targetStudent)) {
+                if (targetStudent && !matchesStudentName(currentStudentInFile, targetStudent)) {
                     return;
                 }
 
                 if (isOralNormalEntry(rowText)) return;
 
-                // Extract start date/time
                 let dateVal = '';
                 for (let cellVal of row) {
                     let strVal = String(cellVal || '').trim();
@@ -311,7 +306,6 @@
             const files = document.getElementById('excelFile').files;
             const studentName = document.getElementById('studentName').value.trim();
 
-            if (!studentName) return alert('Please enter a Student Name to filter the logs.');
             if (files.length === 0) return alert('Select Flight Activity Excel file(s)');
             if (flightBlocks.length === 0) return alert('Add at least one flight block');
             
@@ -323,7 +317,6 @@
             const semesterStart = new Date(startInput + 'T00:00:00');
             const semesterEnd = new Date(endInput + 'T23:59:59');
             
-            // Execute cancellation log filter for current target student
             parseStoredCancellationData(studentName);
 
             document.getElementById('results').innerHTML = '';
@@ -436,7 +429,6 @@
                     const end = endStr ? parseFlexibleDate(endStr) : null;
                     const dateKey = start ? formatDateKey(start) : null;
 
-                    // Direct row test OR cross-reference cancellationRecords log
                     let isStudentAbsent = ABSENT_REGEX.test(lineStr);
 
                     if (!isStudentAbsent && dateKey) {
@@ -534,13 +526,19 @@
             let studentAbsentCount = 0;
 
             const resultsData = blockSlots.map(slot => {
+                const slotDateKey = formatDateKey(slot.date);
+                
+                // Find matching activity from main activity file
                 const matchingActivity = activities.find(act => {
                     if (!act.start) return false;
                     const actEnd = act.end || new Date(act.start.getTime() + 60*60*1000);
                     return (act.start < slot.end && actEnd > slot.start);
                 });
 
-                const isAbsent = matchingActivity && matchingActivity.isStudentAbsent;
+                // Direct cross-reference check against parsed cancellation log records
+                const cancellationMatch = cancellationRecords.find(c => c.dateKey === slotDateKey && c.isStudentAbsent);
+
+                const isAbsent = (matchingActivity && matchingActivity.isStudentAbsent) || !!cancellationMatch;
                 const isFulfilled = !!matchingActivity && !isAbsent;
 
                 if (isFulfilled) attendedCount++;
