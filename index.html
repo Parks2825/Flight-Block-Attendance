@@ -8,8 +8,8 @@
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; background: #f9f9f9; }
-        h1, h2 { color: #333; }
-        table { border-collapse: collapse; width: 100%; margin: 20px 0; background: white; }
+        h1, h2, h3 { color: #333; }
+        table { border-collapse: collapse; width: 100%; margin: 15px 0 25px 0; background: white; }
         th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
         th { background-color: #f2f2f2; }
         .overlap { background-color: #ddffdd !important; font-weight: bold; }
@@ -30,6 +30,8 @@
         .status-msg { margin-top: 5px; font-weight: bold; color: #2e7d32; }
         .badge-cancelled { background: #dc3545; color: #fff; padding: 3px 6px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
         .badge-completed { background: #198754; color: #fff; padding: 3px 6px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
+        .badge-in-block { background: #0d6efd; color: #fff; padding: 3px 6px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
+        .badge-out-block { background: #6c757d; color: #fff; padding: 3px 6px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
         .semester-picker-box { background: #eef6ff; border: 1px solid #b6d4fe; padding: 12px; border-radius: 6px; margin-bottom: 15px; }
         
         /* Execution Log Styling */
@@ -374,29 +376,24 @@
 
                 let startStr = null, endStr = null, detectedType = '', status = '', reasonStr = '';
 
-                // Keywords to explicitly match known activity types in Excel columns
                 const activityKeywords = /(flight\s*\/\s*check\s*ride|check\s*ride|dual\s*flight|solo\s*flight|ground\s*school|ground|sim|simulator|stage\s*check|briefing|oral)/i;
 
                 for (let f of fields) {
                     let strF = String(f || '').trim();
                     
-                    // Match date/time strings
                     if (/\d{1,2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{1,2}:\d{1,2}/.test(strF)) {
                         if (!startStr) startStr = strF;
                         else if (!endStr) endStr = strF;
                     }
 
-                    // Match Activity Status
                     if (['Completed','Cancelled','Scheduled'].includes(strF)) {
                         status = strF;
                     } 
                     
-                    // Explicit pattern match for activity type
                     if (!detectedType && activityKeywords.test(strF)) {
                         detectedType = strF;
                     }
 
-                    // Fallback pattern match for non-date text cell
                     if (!detectedType && strF && !strF.match(/\d{4}/) && strF.length > 2 && !['Completed','Cancelled','Scheduled'].includes(strF) && !strF.toLowerCase().includes('student:')) {
                         detectedType = strF;
                     }
@@ -428,7 +425,8 @@
                             start: start,
                             end: end,
                             status: status || 'Completed',
-                            isStudentAbsent: isStudentAbsent
+                            isStudentAbsent: isStudentAbsent,
+                            rawLine: lineStr
                         });
                     }
                 }
@@ -480,9 +478,16 @@
             let attendedCount = 0;
             let studentAbsentCount = 0;
 
+            // Flag which activities overlap with any scheduled block slot
+            activities.forEach(act => {
+                const actEnd = act.end || new Date(act.start.getTime() + 60*60*1000);
+                act.isWithinBlockWindow = blockSlots.some(slot => (act.start < slot.end && actEnd > slot.start));
+            });
+
             const resultsData = blockSlots.map(slot => {
                 const slotDateKey = formatDateKey(slot.date);
                 
+                // Attendance matching: Strictly check if activity falls inside this block time slot
                 const matchingActivity = activities.find(act => {
                     if (!act.start) return false;
                     const actEnd = act.end || new Date(act.start.getTime() + 60*60*1000);
@@ -505,9 +510,11 @@
             const studentName = document.getElementById('studentName').value.trim() || 'All Students';
             
             let html = `<h2>${filename} (Student: ${studentName})</h2>`;
-            html += `<div class="attendance">📊 Flight Block Attendance Rate<br><strong>${attendancePct}%</strong><br><small>${attendedCount} / ${totalSlots} scheduled block slots fulfilled (${studentAbsentCount} marked "Student Absent" - penalized)</small></div>`;
-            html += `<p class="summary">Date range: ${semStart.toLocaleDateString()} – ${semEnd.toLocaleDateString()} | Filtered Student: "${studentName}" | Exclusions applied: Academic No-Class Days Only (${noClassDates.length} days)</p>`;
+            html += `<div class="attendance">📊 Flight Block Attendance Rate<br><strong>${attendancePct}%</strong><br><small>${attendedCount} / ${totalSlots} scheduled block slots fulfilled strictly during block times (${studentAbsentCount} marked "Student Absent" - penalized)</small></div>`;
+            html += `<p class="summary">Date range: ${semStart.toLocaleDateString()} – ${semEnd.toLocaleDateString()} | Filtered Student: "${studentName}" | Exclusions: Academic No-Class Days (${noClassDates.length} days)</p>`;
             
+            // Section 1: Flight Block Attendance Table
+            html += `<h3>📅 Flight Block Attendance Comparison</h3>`;
             if (totalSlots === 0) {
                 html += `<p>No scheduled flight blocks found in this date range.</p>`;
             } else {
@@ -557,6 +564,48 @@
                 });
                 html += `</tbody></table>`;
             }
+
+            // Section 2: All Parsed Activities Loaded from Excel
+            html += `<h3>📋 All Loaded Activities (${activities.length} total parsed)</h3>`;
+            if (activities.length === 0) {
+                html += `<p>No matching activities found in file for this student.</p>`;
+            } else {
+                html += `<table><thead><tr>
+                    <th>#</th>
+                    <th>Date</th>
+                    <th>Activity Time</th>
+                    <th>Activity Type</th>
+                    <th>Status</th>
+                    <th>Inside Flight Block?</th>
+                    <th>Used for Attendance?</th>
+                </tr></thead><tbody>`;
+
+                activities.forEach((act, idx) => {
+                    const actDateStr = act.start ? act.start.toLocaleDateString() : '—';
+                    const actTimeStr = act.start ? `${act.start.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})} ${act.end ? '– ' + act.end.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : ''}` : '—';
+                    const actStatusBadge = act.status === 'Cancelled' ? '<span class="badge-cancelled">Cancelled</span>' : '<span class="badge-completed">Completed</span>';
+                    
+                    const insideBlockBadge = act.isWithinBlockWindow 
+                        ? '<span class="badge-in-block">Within Block Time</span>' 
+                        : '<span class="badge-out-block">Outside Block Time</span>';
+
+                    const countedForAttendance = (act.isWithinBlockWindow && !act.isStudentAbsent && act.status !== 'Cancelled')
+                        ? '✅ YES' 
+                        : '❌ NO';
+
+                    html += `<tr>
+                        <td>${idx + 1}</td>
+                        <td>${actDateStr}</td>
+                        <td>${actTimeStr}</td>
+                        <td><strong>${act.activityType}</strong></td>
+                        <td>${actStatusBadge}</td>
+                        <td>${insideBlockBadge}</td>
+                        <td><strong>${countedForAttendance}</strong></td>
+                    </tr>`;
+                });
+                html += `</tbody></table>`;
+            }
+
             html += `<hr>`;
             document.getElementById('results').innerHTML += html;
             document.getElementById('status').innerHTML = 'Done.';
