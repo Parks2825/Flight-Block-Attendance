@@ -408,6 +408,7 @@
                     if (start) {
                         activities.push({
                             description: type || 'Scheduled Activity',
+                            activityType: type || 'N/A',
                             start: start,
                             end: end,
                             status: status || 'Completed',
@@ -423,7 +424,6 @@
             const rawBlockDates = [];
             let current = new Date(semesterStart);
 
-            // Filter out ONLY Academic no-class dates
             while (current <= semesterEnd) {
                 const dateKey = formatDateKey(current);
                 if (!noClassDates.includes(dateKey)) {
@@ -500,7 +500,8 @@
                     <th>Scheduled Block</th>
                     <th>Block Time</th>
                     <th>Block Fulfilled?</th>
-                    <th>Excel Activity</th>
+                    <th>Activity Type</th>
+                    <th>Excel Activity Details</th>
                     <th>Activity Status</th>
                 </tr></thead><tbody>`;
 
@@ -523,6 +524,7 @@
                         statusBadge = actStatus === 'Cancelled' ? '<span class="badge-cancelled">Cancelled</span>' : '<span class="badge-completed">Completed</span>';
                     }
 
+                    const actType = item.activity ? item.activity.activityType : '—';
                     const actDetails = item.activity 
                         ? `${item.activity.description} (${item.activity.start.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})})` 
                         : '—';
@@ -532,6 +534,7 @@
                         <td>${item.slot.blockName}</td>
                         <td>${timeStr}</td>
                         <td>${fulfilledLabel}</td>
+                        <td><strong>${actType}</strong></td>
                         <td>${actDetails}</td>
                         <td>${statusBadge}</td>
                     </tr>`;
@@ -603,7 +606,6 @@
             ]);
 
             const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
-            const link = document.append("a");
             const a = document.createElement("a");
             a.setAttribute("href", encodeURI(csvContent));
             a.setAttribute("download", `flight_attendance_history_log.csv`);
