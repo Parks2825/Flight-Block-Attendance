@@ -86,7 +86,7 @@
 
         <div style="margin-bottom: 15px;">
             <label><strong>Student Name Filter:</strong> <input type="text" id="studentName" placeholder="e.g. Meyer, A." value="" style="width: 220px;"></label>
-            <small style="color:#666; margin-left: 8px;">(Matches "Student: [Name]" block headers)</small>
+            <small style="color:#666; margin-left: 8px;">(Matches "Student: [Name]" block headers regardless of spacing)</small>
         </div>
 
         <div class="file-inputs">
@@ -129,7 +129,7 @@
         let runCount = 0;
 
         // Broadened regex to catch variations of student absence / cancellation reasons
-        const ABSENT_REGEX = /(student[\s\-_]*(absent|absence|no[\s\-]*show|cancel|sick|unexcused)|canceled\s+by\s+student|student\s+canceled)/i;
+        const ABSENT_REGEX = /(student[\s\-_]*(absent|absence|no[\s\-]*show|cancel|sick|unexcused)|canceled\s+by\s+student|student\s+canceled|medical\s*\(\s*absent\s*\))/i;
 
         const usuSemesters = {
             spring2026: {
@@ -154,6 +154,11 @@
             }
         };
 
+        function normalizeName(str) {
+            if (!str) return '';
+            return str.toLowerCase().replace(/\s*,\s*/g, ',').replace(/\s+/g, ' ').trim();
+        }
+
         function loadUSUSemesterData() {
             const selectedKey = document.getElementById('usuSemesterSelect').value;
             const badge = document.getElementById('semesterDataBadge');
@@ -177,18 +182,37 @@
             if (!targetName) return true;
             if (!currentStudentText) return false;
 
-            const cleanText = currentStudentText.toLowerCase().replace(/[^a-z0-9]/g, '');
-            const cleanTarget = targetName.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const normText = normalizeName(currentStudentText);
+            const normTarget = normalizeName(targetName);
 
-            if (cleanText.includes(cleanTarget) || cleanTarget.includes(cleanText)) return true;
+            if (normText.includes(normTarget) || normTarget.includes(normText)) return true;
 
-            const parts = targetName.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(p => p.length > 0);
-            return parts.length > 0 && parts.every(part => cleanText.includes(part));
+            const targetParts = normTarget.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(p => p.length > 0);
+            return targetParts.length > 0 && targetParts.every(part => normText.includes(part));
         }
 
         function isOralNormalEntry(str) {
             const normalized = str.toLowerCase().replace(/\s+/g, '');
             return normalized.includes('oral-normal') || normalized.includes('oral/normal');
+        }
+
+        function parseFlexibleDate(str) {
+            if (!str) return null;
+            let dateStr = String(str).trim();
+
+            // Fix non-padded single digit hours/minutes like "24 Jul 2026 08:5" -> "24 Jul 2026 08:05"
+            dateStr = dateStr.replace(/:(\d)\b/g, ':0$1');
+
+            const date = new Date(dateStr);
+            return !isNaN(date.getTime()) ? date : null;
+        }
+
+        function formatDateKey(dateObj) {
+            if (!dateObj) return '';
+            const year = dateObj.getFullYear();
+            const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+            const day = String(dateObj.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
         }
 
         function handleCancellationFile(input) {
@@ -217,7 +241,6 @@
             if (!rawCancellationRows || rawCancellationRows.length === 0) return;
 
             let currentStudentInFile = ""; 
-            const activityTimeRegex = /\b\d{2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{1,2}:\d{1,2}\b/;
 
             rawCancellationRows.forEach(row => {
                 if (!Array.isArray(row)) return;
@@ -241,7 +264,7 @@
                 for (let cellVal of row) {
                     let strVal = String(cellVal || '').trim();
                     if (strVal.toUpperCase().includes('START DATE') || strVal.toUpperCase().includes('STOP DATE')) continue;
-                    if (activityTimeRegex.test(strVal) && !dateVal) {
+                    if (/\d{1,2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{1,2}:\d{1,2}/.test(strVal) && !dateVal) {
                         dateVal = strVal;
                         break;
                     }
@@ -355,7 +378,7 @@
                 let startStr = null, type = '';
                 for (let f of fields) {
                     let strF = String(f || '').trim();
-                    if (/\d{2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{2}:\d{2}/.test(strF) && !startStr) startStr = strF;
+                    if (/\d{1,2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{1,2}:\d{1,2}/.test(strF) && !startStr) startStr = strF;
                     if (strF.includes('Academic') || strF.includes('Oral') || strF.includes('Flight') || strF.includes('Check')) type = strF;
                 }
 
@@ -382,7 +405,7 @@
                 let startStr = null;
                 for (let f of fields) {
                     let strF = String(f || '').trim();
-                    if (/\d{2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{2}:\d{2}/.test(strF) && !startStr) startStr = strF;
+                    if (/\d{1,2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{1,2}:\d{1,2}/.test(strF) && !startStr) startStr = strF;
                 }
 
                 if (startStr && lineStr.toLowerCase().includes('night dual')) {
@@ -410,7 +433,7 @@
 
                 for (let f of fields) {
                     let strF = String(f || '').trim();
-                    if (/\d{2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{2}:\d{2}/.test(strF)) {
+                    if (/\d{1,2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{1,2}:\d{1,2}/.test(strF)) {
                         if (!startStr) startStr = strF;
                         else if (!endStr) endStr = strF;
                     }
@@ -448,20 +471,6 @@
                 }
             }
             return activities;
-        }
-
-        function parseFlexibleDate(str) {
-            if (!str) return null;
-            let date = new Date(str);
-            return !isNaN(date.getTime()) ? date : null;
-        }
-
-        function formatDateKey(dateObj) {
-            if (!dateObj) return '';
-            const year = dateObj.getFullYear();
-            const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-            const day = String(dateObj.getDate()).padStart(2, '0');
-            return `${year}-${month}-${day}`;
         }
 
         function generateExpectedBlockSlots(semesterStart, semesterEnd, checkDates = [], nightDualDates = []) {
@@ -528,14 +537,12 @@
             const resultsData = blockSlots.map(slot => {
                 const slotDateKey = formatDateKey(slot.date);
                 
-                // Find matching activity from main activity file
                 const matchingActivity = activities.find(act => {
                     if (!act.start) return false;
                     const actEnd = act.end || new Date(act.start.getTime() + 60*60*1000);
                     return (act.start < slot.end && actEnd > slot.start);
                 });
 
-                // Direct cross-reference check against parsed cancellation log records
                 const cancellationMatch = cancellationRecords.find(c => c.dateKey === slotDateKey && c.isStudentAbsent);
 
                 const isAbsent = (matchingActivity && matchingActivity.isStudentAbsent) || !!cancellationMatch;
