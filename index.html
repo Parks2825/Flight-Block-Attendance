@@ -173,7 +173,7 @@
                 document.getElementById('semesterStart').value = semData.start;
                 document.getElementById('semesterEnd').value = semData.end;
                 noClassDates = [...semData.noClass];
-                badge.innerHTML = `✔ Loaded preset: <strong>${semData.start}</strong> to <strong>${semData.end}</strong> (${noClassDates.length} "no class" dates).`;
+                badge.innerHTML = `✔ Loaded preset: <strong>${semData.start}</strong> to <strong>${semData.end}</strong> (${noClassDates.length} Academic "no class" dates).`;
             }
         }
 
@@ -352,72 +352,14 @@
                         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
                         const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
-                        const checkDates = extractCheckDates(rows, studentName);
-                        const nightDualDates = extractNightDualDates(rows, studentName);
                         const activities = parseStudentSchedule(rows, studentName);
-                        displayResults(file.name, activities, semesterStart, semesterEnd, checkDates, nightDualDates);
+                        displayResults(file.name, activities, semesterStart, semesterEnd);
                     } catch (err) {
                         document.getElementById('status').innerHTML += `<p>Error: ${err.message}</p>`;
                     }
                 };
                 reader.readAsArrayBuffer(file);
             });
-        }
-
-        function extractCheckDates(rows, studentName) {
-            const checkDates = [];
-            for (let fields of rows) {
-                if (!Array.isArray(fields)) continue;
-                let lineStr = fields.join(' ');
-
-                if (!matchesStudentName(lineStr, studentName)) continue;
-                if (!/\d{4}/.test(lineStr)) continue;
-                
-                let startStr = null, type = '';
-                for (let f of fields) {
-                    let strF = String(f || '').trim();
-                    if (/\d{1,2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{1,2}:\d{1,2}/.test(strF) && !startStr) startStr = strF;
-                    if (strF.includes('Academic') || strF.includes('Oral') || strF.includes('Flight') || strF.includes('Check')) type = strF;
-                }
-
-                // Explicitly exclude any activity tagged with "SC" (e.g. Stage Check / SC code)
-                const isSC = /\bSC\b/i.test(lineStr) || /\bSC\b/i.test(type);
-
-                if (startStr && type.toLowerCase().includes('check') && !isSC) {
-                    const parsedDate = parseFlexibleDate(startStr);
-                    if (parsedDate) {
-                        const dateKey = formatDateKey(parsedDate);
-                        if (!checkDates.includes(dateKey)) checkDates.push(dateKey);
-                    }
-                }
-            }
-            return checkDates;
-        }
-
-        function extractNightDualDates(rows, studentName) {
-            const nightDualDates = [];
-            for (let fields of rows) {
-                if (!Array.isArray(fields)) continue;
-                let lineStr = fields.join(' ');
-
-                if (!matchesStudentName(lineStr, studentName)) continue;
-                if (!/\d{4}/.test(lineStr)) continue;
-                
-                let startStr = null;
-                for (let f of fields) {
-                    let strF = String(f || '').trim();
-                    if (/\d{1,2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{1,2}:\d{1,2}/.test(strF) && !startStr) startStr = strF;
-                }
-
-                if (startStr && lineStr.toLowerCase().includes('night dual')) {
-                    const parsedDate = parseFlexibleDate(startStr);
-                    if (parsedDate) {
-                        const dateKey = formatDateKey(parsedDate);
-                        if (!nightDualDates.includes(dateKey)) nightDualDates.push(dateKey);
-                    }
-                }
-            }
-            return nightDualDates;
         }
 
         function parseStudentSchedule(rows, studentName) {
@@ -477,10 +419,11 @@
             return activities;
         }
 
-        function generateExpectedBlockSlots(semesterStart, semesterEnd, checkDates = [], nightDualDates = []) {
+        function generateExpectedBlockSlots(semesterStart, semesterEnd) {
             const rawBlockDates = [];
             let current = new Date(semesterStart);
 
+            // Filter out ONLY Academic no-class dates
             while (current <= semesterEnd) {
                 const dateKey = formatDateKey(current);
                 if (!noClassDates.includes(dateKey)) {
@@ -492,25 +435,8 @@
                 current.setDate(current.getDate() + 1);
             }
 
-            const excludedDatesSet = new Set();
-            
-            checkDates.forEach(checkDateStr => {
-                const checkTime = new Date(checkDateStr + 'T00:00:00').getTime();
-                const priorBlockDates = rawBlockDates.filter(d => d.getTime() < checkTime);
-                priorBlockDates.slice(-3).forEach(d => excludedDatesSet.add(formatDateKey(d)));
-            });
-
-            nightDualDates.forEach(nightDualDateStr => {
-                const nightDualTime = new Date(nightDualDateStr + 'T00:00:00').getTime();
-                const priorBlockDates = rawBlockDates.filter(d => d.getTime() < nightDualTime);
-                priorBlockDates.slice(-1).forEach(d => excludedDatesSet.add(formatDateKey(d)));
-            });
-
             const slots = [];
             rawBlockDates.forEach(blockDate => {
-                const dateKey = formatDateKey(blockDate);
-                if (excludedDatesSet.has(dateKey)) return;
-
                 const dayOfWeek = blockDate.getDay();
                 flightBlocks.forEach(block => {
                     if (block.days.includes(dayOfWeek)) {
@@ -533,8 +459,8 @@
             return slots;
         }
 
-        function displayResults(filename, activities, semStart, semEnd, checkDates, nightDualDates) {
-            const blockSlots = generateExpectedBlockSlots(semStart, semEnd, checkDates, nightDualDates);
+        function displayResults(filename, activities, semStart, semEnd) {
+            const blockSlots = generateExpectedBlockSlots(semStart, semEnd);
             let attendedCount = 0;
             let studentAbsentCount = 0;
 
@@ -564,7 +490,7 @@
             
             let html = `<h2>${filename} (Student: ${studentName})</h2>`;
             html += `<div class="attendance">📊 Flight Block Attendance Rate<br><strong>${attendancePct}%</strong><br><small>${attendedCount} / ${totalSlots} scheduled block slots fulfilled (${studentAbsentCount} marked "Student Absent" - penalized)</small></div>`;
-            html += `<p class="summary">Date range: ${semStart.toLocaleDateString()} – ${semEnd.toLocaleDateString()} | Filtered Student: "${studentName}" | Check Events: ${checkDates.length} | Night Dual Events: ${nightDualDates.length}</p>`;
+            html += `<p class="summary">Date range: ${semStart.toLocaleDateString()} – ${semEnd.toLocaleDateString()} | Filtered Student: "${studentName}" | Exclusions applied: Academic No-Class Days Only (${noClassDates.length} days)</p>`;
             
             if (totalSlots === 0) {
                 html += `<p>No scheduled flight blocks found in this date range.</p>`;
@@ -623,8 +549,6 @@
                 fulfilledCount: attendedCount,
                 totalSlots: totalSlots,
                 studentAbsentCount: studentAbsentCount,
-                checkEventsCount: checkDates.length,
-                nightDualEventsCount: nightDualDates.length,
                 semStart: semStart.toLocaleDateString(),
                 semEnd: semEnd.toLocaleDateString()
             });
@@ -644,9 +568,7 @@
                 fulfilled: `${logData.fulfilledCount}/${logData.totalSlots}`,
                 studentAbsences: logData.studentAbsentCount,
                 filename: logData.filename,
-                dateRange: `${logData.semStart} to ${logData.semEnd}`,
-                checkEvents: logData.checkEventsCount,
-                nightDualEvents: logData.nightDualEventsCount
+                dateRange: `${logData.semStart} to ${logData.semEnd}`
             };
 
             executionLogData.push(record);
@@ -659,7 +581,7 @@
                 </div><br>
                 <strong>File:</strong> ${record.filename}<br>
                 <strong>Stats:</strong> ${record.fulfilled} fulfilled blocks (${record.studentAbsences} penalized student absences)<br>
-                <strong>Date Range:</strong> ${record.dateRange} | <strong>Exclusions:</strong> ${record.checkEvents} check events, ${record.nightDualEvents} night dual events
+                <strong>Date Range:</strong> ${record.dateRange} | <strong>Exclusions:</strong> Academic calendar no-class days only
             `;
 
             historyContainer.prepend(entry);
@@ -668,7 +590,7 @@
         function exportLogToCSV() {
             if (executionLogData.length === 0) return alert('No execution logs recorded yet to export.');
 
-            const headers = ["Run Number", "Timestamp", "Student Name", "Attendance Rate", "Fulfilled Blocks", "Student Absences", "File Name", "Date Range", "Check Events", "Night Dual Events"];
+            const headers = ["Run Number", "Timestamp", "Student Name", "Attendance Rate", "Fulfilled Blocks", "Student Absences", "File Name", "Date Range"];
             const rows = executionLogData.map(log => [
                 log.runNumber,
                 `"${log.timestamp}"`,
@@ -677,18 +599,17 @@
                 `"${log.fulfilled}"`,
                 log.studentAbsences,
                 `"${log.filename}"`,
-                `"${log.dateRange}"`,
-                log.checkEvents,
-                log.nightDualEvents
+                `"${log.dateRange}"`
             ]);
 
             const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
-            const link = document.createElement("a");
-            link.setAttribute("href", encodeURI(csvContent));
-            link.setAttribute("download", `flight_attendance_history_log.csv`);
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+            const link = document.append("a");
+            const a = document.createElement("a");
+            a.setAttribute("href", encodeURI(csvContent));
+            a.setAttribute("download", `flight_attendance_history_log.csv`);
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
         }
 
         function clearRunHistory() {
