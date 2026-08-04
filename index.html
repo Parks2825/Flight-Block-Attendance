@@ -128,7 +128,6 @@
         let executionLogData = [];
         let runCount = 0;
 
-        // Broadened regex to catch variations of student absence / cancellation reasons
         const ABSENT_REGEX = /(student[\s\-_]*(absent|absence|no[\s\-]*show|cancel|sick|unexcused)|canceled\s+by\s+student|student\s+canceled|medical\s*\(\s*absent\s*\))/i;
 
         const usuSemesters = {
@@ -437,8 +436,12 @@
                         if (!startStr) startStr = strF;
                         else if (!endStr) endStr = strF;
                     }
-                    if (strF.includes('Flight') || strF.includes('Check') || strF.includes('Dual') || strF.includes('Solo') || strF.includes('Academic') || strF.includes('Oral') || strF.includes('GND')) type = strF;
-                    if (['Completed','Cancelled','Scheduled'].includes(strF)) status = strF;
+                    if (['Completed','Cancelled','Scheduled'].includes(strF)) {
+                        status = strF;
+                    } else if (strF && !strF.match(/\d{4}/) && strF.length > 2 && !startStr) {
+                        // Capture descriptive text before or alongside dates
+                        if (!type) type = strF;
+                    }
                     if (!reasonStr && (ABSENT_REGEX.test(strF) || strF.toLowerCase().includes('reason') || strF.toLowerCase().includes('weather') || strF.toLowerCase().includes('maintenance'))) {
                         reasonStr = strF;
                     }
@@ -461,7 +464,7 @@
 
                     if (start) {
                         activities.push({
-                            description: type || 'Flight Activity',
+                            description: type || 'Scheduled Activity',
                             start: start,
                             end: end,
                             status: status || 'Completed',
@@ -537,6 +540,7 @@
             const resultsData = blockSlots.map(slot => {
                 const slotDateKey = formatDateKey(slot.date);
                 
+                // Any activity overlapping or scheduled between block times matches
                 const matchingActivity = activities.find(act => {
                     if (!act.start) return false;
                     const actEnd = act.end || new Date(act.start.getTime() + 60*60*1000);
