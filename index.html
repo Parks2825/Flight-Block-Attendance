@@ -199,7 +199,6 @@
             if (!str) return null;
             let dateStr = String(str).trim();
 
-            // Fix non-padded single digit hours/minutes like "24 Jul 2026 08:5" -> "24 Jul 2026 08:05"
             dateStr = dateStr.replace(/:(\d)\b/g, ':0$1');
 
             const date = new Date(dateStr);
@@ -381,7 +380,10 @@
                     if (strF.includes('Academic') || strF.includes('Oral') || strF.includes('Flight') || strF.includes('Check')) type = strF;
                 }
 
-                if (startStr && type.toLowerCase().includes('check')) {
+                // Explicitly exclude any activity tagged with "SC" (e.g. Stage Check / SC code)
+                const isSC = /\bSC\b/i.test(lineStr) || /\bSC\b/i.test(type);
+
+                if (startStr && type.toLowerCase().includes('check') && !isSC) {
                     const parsedDate = parseFlexibleDate(startStr);
                     if (parsedDate) {
                         const dateKey = formatDateKey(parsedDate);
@@ -439,7 +441,6 @@
                     if (['Completed','Cancelled','Scheduled'].includes(strF)) {
                         status = strF;
                     } else if (strF && !strF.match(/\d{4}/) && strF.length > 2 && !startStr) {
-                        // Capture descriptive text before or alongside dates
                         if (!type) type = strF;
                     }
                     if (!reasonStr && (ABSENT_REGEX.test(strF) || strF.toLowerCase().includes('reason') || strF.toLowerCase().includes('weather') || strF.toLowerCase().includes('maintenance'))) {
@@ -540,7 +541,6 @@
             const resultsData = blockSlots.map(slot => {
                 const slotDateKey = formatDateKey(slot.date);
                 
-                // Any activity overlapping or scheduled between block times matches
                 const matchingActivity = activities.find(act => {
                     if (!act.start) return false;
                     const actEnd = act.end || new Date(act.start.getTime() + 60*60*1000);
