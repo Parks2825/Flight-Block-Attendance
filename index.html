@@ -36,6 +36,26 @@
         .badge-reason { background: #d9534f; color: #fff; padding: 3px 6px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
         .semester-picker-box { background: #eef6ff; border: 1px solid #b6d4fe; padding: 12px; border-radius: 6px; margin-bottom: 15px; }
         
+        /* Expandable section styling */
+        details.expandable-section {
+            background: white;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            padding: 10px 15px;
+            margin-top: 20px;
+        }
+        details.expandable-section summary {
+            font-size: 1.17em;
+            font-weight: bold;
+            cursor: pointer;
+            color: #333;
+            outline: none;
+            padding: 5px 0;
+        }
+        details.expandable-section summary:hover {
+            color: #0066cc;
+        }
+
         /* Execution Log Styling */
         .history-log-box { background: #1e1e1e; color: #00ff66; font-family: 'Courier New', Courier, monospace; }
         .history-log-box h2 { color: #ffffff; border-bottom: 1px solid #444; padding-bottom: 8px; }
@@ -194,7 +214,6 @@
             return targetParts.length > 0 && targetParts.every(part => normText.includes(part));
         }
 
-        // Extracts the actual Unit string while filtering out standalone generic words like "Dual" or "Solo"
         function extractUnitFromStr(str) {
             if (!str) return '';
             let rawUnit = '';
@@ -210,7 +229,6 @@
 
             if (!rawUnit) return '';
 
-            // Ignore dates, "normal", "check ride", and pure generic words like "Dual" or "Solo" without a unit code
             const isGenericWord = /^(dual|solo|local|cross country|xc)$/i.test(rawUnit);
             const isInvalid = rawUnit.toLowerCase().includes('normal') || 
                               rawUnit.toLowerCase().includes('check ride') || 
@@ -405,13 +423,11 @@
                 if (!Array.isArray(fields)) continue;
                 let lineStr = fields.map(f => String(f || '').trim()).join(' ');
 
-                // Check for block header with Name / Unit
                 if (lineStr.includes('/')) {
                     const parsedUnit = extractUnitFromStr(lineStr);
                     if (parsedUnit) currentUnit = parsedUnit;
                 }
 
-                // Detect column indices from header rows
                 if (fields.some(f => /activity\s*type|unit|course/i.test(String(f || '')))) {
                     fields.forEach((f, idx) => {
                         let colHeader = String(f || '').trim().toLowerCase();
@@ -432,14 +448,12 @@
                 let startStr = null, endStr = null, detectedType = '', status = '', reasonStr = '';
                 let rowUnit = currentUnit;
 
-                // 1. Explicit unit column check
                 if (unitColIdx !== -1 && fields[unitColIdx] !== undefined) {
                     let cellVal = String(fields[unitColIdx] || '').trim();
                     let extracted = extractUnitFromStr(cellVal);
                     if (extracted) rowUnit = extracted;
                 }
 
-                // 2. Scan all cell fields for explicit Unit codes (e.g. "FL 1 Local-Dual")
                 for (let f of fields) {
                     let strF = String(f || '').trim();
                     if (unitCodePattern.test(strF)) {
@@ -687,12 +701,14 @@
                 html += `</tbody></table>`;
             }
 
-            // Section 2: All Parsed Activities Loaded from Excel
-            html += `<h3>📋 All Loaded Activities (${activities.length} total parsed)</h3>`;
+            // Section 2: All Parsed Activities (Wrapped in Expandable/Collapsible Container)
+            html += `<details class="expandable-section">
+                <summary>📋 All Loaded Activities (${activities.length} total parsed - click to expand/collapse)</summary>`;
+            
             if (activities.length === 0) {
-                html += `<p>No matching activities found in file for this student.</p>`;
+                html += `<p style="margin-top: 10px;">No matching activities found in file for this student.</p>`;
             } else {
-                html += `<table><thead><tr>
+                html += `<table style="margin-top: 10px;"><thead><tr>
                     <th>#</th>
                     <th>Date</th>
                     <th>Activity Time</th>
@@ -737,7 +753,7 @@
                 html += `</tbody></table>`;
             }
 
-            html += `<hr>`;
+            html += `</details><hr>`;
             document.getElementById('results').innerHTML += html;
             document.getElementById('status').innerHTML = 'Done.';
 
