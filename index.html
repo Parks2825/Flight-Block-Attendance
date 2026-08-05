@@ -642,13 +642,13 @@
                 };
             });
 
-            // Find all Stage Check dates
+            // Find all active (non-cancelled) Stage Check dates
             const stageCheckDates = activities
-                .filter(act => act.isStageCheck && act.start)
+                .filter(act => act.isStageCheck && act.start && act.status !== 'Cancelled')
                 .map(act => act.start)
                 .sort((a, b) => a - b);
 
-            // Working backward from each Stage Check date, exclude up to 'blocksToExcludeCount' unfulfilled block slots
+            // Working backward from each active Stage Check date, exclude up to 'blocksToExcludeCount' unfulfilled block slots
             let totalExcludedSlots = 0;
             if (blocksToExcludeCount > 0) {
                 stageCheckDates.forEach((scDate, idx) => {
@@ -686,7 +686,7 @@
             
             let html = `<h2>${filename} (Student: ${studentName}${primaryUnit !== '—' ? ' | Unit: ' + primaryUnit : ''})</h2>`;
             html += `<div class="attendance">📊 Flight Block Attendance Rate<br><strong>${attendancePct}%</strong><br><small>${attendedCount} / ${effectiveTotalSlots} effective block slots fulfilled (${totalExcludedSlots} unfulfilled slots excluded prior to Stage Checks, limit: ${blocksToExcludeCount} per check)</small></div>`;
-            html += `<p class="summary">Date range: ${semStart.toLocaleDateString()} – ${semEnd.toLocaleDateString()} | Filtered Student: "${studentName}" | Stage Checks Detected: ${stageCheckDates.length} | Excluded Slots: ${totalExcludedSlots}</p>`;
+            html += `<p class="summary">Date range: ${semStart.toLocaleDateString()} – ${semEnd.toLocaleDateString()} | Filtered Student: "${studentName}" | Active Stage Checks Detected: ${stageCheckDates.length} | Excluded Slots: ${totalExcludedSlots}</p>`;
             
             // Section 1: Flight Block Attendance Table
             html += `<h3>📅 Flight Block Attendance Comparison</h3>`;
