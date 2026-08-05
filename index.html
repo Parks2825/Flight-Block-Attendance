@@ -38,7 +38,6 @@
         .badge-excluded { background: #6c757d; color: #fff; padding: 3px 6px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
         .semester-picker-box { background: #eef6ff; border: 1px solid #b6d4fe; padding: 12px; border-radius: 6px; margin-bottom: 15px; }
         
-        /* Expandable section styling */
         details.expandable-section {
             background: white;
             border: 1px solid #ccc;
@@ -58,7 +57,6 @@
             color: #0066cc;
         }
 
-        /* Execution Log Styling */
         .history-log-box { background: #1e1e1e; color: #00ff66; font-family: 'Courier New', Courier, monospace; }
         .history-log-box h2 { color: #ffffff; border-bottom: 1px solid #444; padding-bottom: 8px; }
         .log-entry { margin-bottom: 10px; padding: 8px; border-bottom: 1px dashed #444; line-height: 1.5em; }
@@ -97,7 +95,6 @@
 
     <!-- Main Controls -->
     <div class="controls">
-        <!-- USU Semester Quick Selector -->
         <div class="semester-picker-box">
             <label><strong>Select USU Academic Semester:</strong> </label>
             <select id="usuSemesterSelect" onchange="loadUSUSemesterData()">
@@ -614,14 +611,13 @@
 
         function displayResults(filename, activities, semStart, semEnd) {
             const blockSlots = generateExpectedBlockSlots(semStart, semEnd);
-            const exclusionLimit = parseInt(document.getElementById('stageCheckExclusionLimit').value) || 0;
+            const blocksToExcludeCount = parseInt(document.getElementById('stageCheckExclusionLimit').value) || 0;
 
             activities.forEach(act => {
                 const actEnd = act.end || new Date(act.start.getTime() + 60*60*1000);
                 act.isWithinBlockWindow = blockSlots.some(slot => (act.start < slot.end && actEnd > slot.start));
             });
 
-            // Map block slots to activities and determine raw fulfillment
             const resultsData = blockSlots.map(slot => {
                 const slotDateKey = formatDateKey(slot.date);
                 
@@ -646,26 +642,26 @@
                 };
             });
 
-            // Locate all Stage Check dates in activities
+            // Find all Stage Check dates
             const stageCheckDates = activities
                 .filter(act => act.isStageCheck && act.start)
                 .map(act => act.start)
                 .sort((a, b) => a - b);
 
-            // Exclude up to 'exclusionLimit' unfulfilled block slots prior to EACH Stage Check
+            // Working backward from each Stage Check date, exclude up to 'blocksToExcludeCount' unfulfilled block slots
             let totalExcludedSlots = 0;
-            if (exclusionLimit > 0) {
+            if (blocksToExcludeCount > 0) {
                 stageCheckDates.forEach((scDate, idx) => {
-                    let unfulfilledFound = 0;
-                    for (let i = 0; i < resultsData.length; i++) {
+                    let countForThisCheck = 0;
+                    for (let i = resultsData.length - 1; i >= 0; i--) {
                         const item = resultsData[i];
                         if (item.slot.start < scDate) {
                             if (!item.fulfilled && !item.excludedFromAttendance) {
                                 item.excludedFromAttendance = true;
-                                item.exclusionReason = `Prior to Stage Check #${idx + 1} (${scDate.toLocaleDateString()})`;
-                                unfulfilledFound++;
+                                item.exclusionReason = `Prior to Stage Check (${scDate.toLocaleDateString()})`;
+                                countForThisCheck++;
                                 totalExcludedSlots++;
-                                if (unfulfilledFound === exclusionLimit) break;
+                                if (countForThisCheck === blocksToExcludeCount) break;
                             }
                         }
                     }
@@ -689,7 +685,7 @@
             const primaryUnit = (activities.length > 0 && activities[0].unit !== '—') ? activities[0].unit : '—';
             
             let html = `<h2>${filename} (Student: ${studentName}${primaryUnit !== '—' ? ' | Unit: ' + primaryUnit : ''})</h2>`;
-            html += `<div class="attendance">📊 Flight Block Attendance Rate<br><strong>${attendancePct}%</strong><br><small>${attendedCount} / ${effectiveTotalSlots} effective block slots fulfilled (${totalExcludedSlots} unfulfilled slots excluded prior to Stage Checks, limit: ${exclusionLimit}/check)</small></div>`;
+            html += `<div class="attendance">📊 Flight Block Attendance Rate<br><strong>${attendancePct}%</strong><br><small>${attendedCount} / ${effectiveTotalSlots} effective block slots fulfilled (${totalExcludedSlots} unfulfilled slots excluded prior to Stage Checks, limit: ${blocksToExcludeCount} per check)</small></div>`;
             html += `<p class="summary">Date range: ${semStart.toLocaleDateString()} – ${semEnd.toLocaleDateString()} | Filtered Student: "${studentName}" | Stage Checks Detected: ${stageCheckDates.length} | Excluded Slots: ${totalExcludedSlots}</p>`;
             
             // Section 1: Flight Block Attendance Table
@@ -756,7 +752,7 @@
                 html += `</tbody></table>`;
             }
 
-            // Section 2: All Parsed Activities (Wrapped in Expandable/Collapsible Container)
+            // Section 2: All Parsed Activities
             html += `<details class="expandable-section">
                 <summary>📋 All Loaded Activities (${activities.length} total parsed - click to expand/collapse)</summary>`;
             
