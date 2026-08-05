@@ -32,6 +32,7 @@
         .badge-completed { background: #198754; color: #fff; padding: 3px 6px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
         .badge-in-block { background: #0d6efd; color: #fff; padding: 3px 6px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
         .badge-out-block { background: #6c757d; color: #fff; padding: 3px 6px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
+        .badge-unit { background: #6f42c1; color: #fff; padding: 3px 6px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
         .semester-picker-box { background: #eef6ff; border: 1px solid #b6d4fe; padding: 12px; border-radius: 6px; margin-bottom: 15px; }
         
         /* Execution Log Styling */
@@ -87,7 +88,7 @@
         </div>
 
         <div style="margin-bottom: 15px;">
-            <label><strong>Student Name Filter:</strong> <input type="text" id="studentName" placeholder="e.g. Meyer, A." value="" style="width: 220px;"></label>
+            <label><strong>Student Name Filter:</strong> <input type="text" id="studentName" placeholder="e.g. Taufahema, M." value="" style="width: 220px;"></label>
             <small style="color:#666; margin-left: 8px;">(Matches "Student: [Name]" block headers regardless of spacing)</small>
         </div>
 
@@ -192,6 +193,19 @@
             return targetParts.length > 0 && targetParts.every(part => normText.includes(part));
         }
 
+        function extractUnitFromStr(str) {
+            if (!str || !str.includes('/')) return '';
+            const parts = str.split('/');
+            if (parts.length >= 2) {
+                let unit = parts[1].trim();
+                // Filter out non-unit slashes like oral/normal or date strings
+                if (unit && !unit.toLowerCase().includes('normal') && !unit.toLowerCase().includes('check ride') && !/\d{4}/.test(unit)) {
+                    return unit;
+                }
+            }
+            return '';
+        }
+
         function isOralNormalEntry(str) {
             const normalized = str.toLowerCase().replace(/\s+/g, '');
             return normalized.includes('oral-normal') || normalized.includes('oral/normal');
@@ -200,9 +214,7 @@
         function parseFlexibleDate(str) {
             if (!str) return null;
             let dateStr = String(str).trim();
-
             dateStr = dateStr.replace(/:(\d)\b/g, ':0$1');
-
             const date = new Date(dateStr);
             return !isNaN(date.getTime()) ? date : null;
         }
@@ -368,15 +380,21 @@
             const activities = [];
             let activityTypeColIdx = -1;
             let statusColIdx = -1;
+            let currentUnit = '—';
             
-            // Keywords to match common activity type values if header column mapping is missing
             const activityKeywords = /(flight\s*\/\s*check\s*ride|check\s*ride|dual\s*flight|solo\s*flight|ground\s*school|ground|sim|simulator|stage\s*check|briefing|oral)/i;
 
             for (let fields of rows) {
                 if (!Array.isArray(fields)) continue;
                 let lineStr = fields.map(f => String(f || '').trim()).join(' ');
 
-                // Check if this row is a column header row containing "Activity Type/Subtype"
+                // Extract Unit if header row or entry contains "Student: Name / Unit" or "Name / Unit"
+                if (lineStr.includes('/')) {
+                    const parsedUnit = extractUnitFromStr(lineStr);
+                    if (parsedUnit) currentUnit = parsedUnit;
+                }
+
+                // Check header row for Activity Type / Status
                 if (fields.some(f => /activity\s*type/i.test(String(f || '')))) {
                     fields.forEach((f, idx) => {
                         let colHeader = String(f || '').trim().toLowerCase();
@@ -386,15 +404,25 @@
                             statusColIdx = idx;
                         }
                     });
-                    continue; // Skip processing the header row itself as data
+                    continue;
                 }
 
                 if (!matchesStudentName(lineStr, studentName)) continue;
                 if (!/\d{4}/.test(lineStr)) continue;
 
                 let startStr = null, endStr = null, detectedType = '', status = '', reasonStr = '';
+                let rowUnit = currentUnit;
 
-                // If column index for "Activity Type/Subtype" was successfully mapped from headers
+                // Check specific cell for Student Name / Unit format
+                for (let f of fields) {
+                    let strF = String(f || '').trim();
+                    if (strF.includes('/')) {
+                        const u = extractUnitFromStr(strF);
+                        if (u) rowUnit = u;
+                    }
+                }
+
+                // If column index for "Activity Type/Subtype" was mapped from headers
                 if (activityTypeColIdx !== -1 && fields[activityTypeColIdx] !== undefined) {
                     let cellVal = String(fields[activityTypeColIdx] || '').trim();
                     if (cellVal && !cellVal.toLowerCase().includes('activity type')) {
@@ -409,22 +437,18 @@
                     }
                 }
 
-                // Field loop for dates and fallbacks
                 for (let idx = 0; idx < fields.length; idx++) {
                     let strF = String(fields[idx] || '').trim();
                     
-                    // Match date/time strings
                     if (/\d{1,2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{1,2}:\d{1,2}/.test(strF)) {
                         if (!startStr) startStr = strF;
                         else if (!endStr) endStr = strF;
                     }
 
-                    // Match Activity Status if not already found via column header
                     if (!status && ['Completed','Cancelled','Scheduled'].includes(strF)) {
                         status = strF;
                     } 
                     
-                    // Fallback pattern match for Activity Type if column header mapping wasn't found
                     if (!detectedType && activityKeywords.test(strF)) {
                         detectedType = strF;
                     }
@@ -434,7 +458,6 @@
                     }
                 }
 
-                // Secondary fallback for detectedType if column index wasn't found and keyword didn't match
                 if (!detectedType) {
                     for (let strF of fields) {
                         let cleanF = String(strF || '').trim();
@@ -467,6 +490,7 @@
                         activities.push({
                             description: detectedType || 'Scheduled Activity',
                             activityType: detectedType || 'Flight / General',
+                            unit: rowUnit || '—',
                             start: start,
                             end: end,
                             status: status || 'Completed',
@@ -523,7 +547,6 @@
             let attendedCount = 0;
             let studentAbsentCount = 0;
 
-            // Flag which activities overlap with any scheduled block slot
             activities.forEach(act => {
                 const actEnd = act.end || new Date(act.start.getTime() + 60*60*1000);
                 act.isWithinBlockWindow = blockSlots.some(slot => (act.start < slot.end && actEnd > slot.start));
@@ -532,7 +555,6 @@
             const resultsData = blockSlots.map(slot => {
                 const slotDateKey = formatDateKey(slot.date);
                 
-                // Attendance matching: Strictly check if activity falls inside this block time slot
                 const matchingActivity = activities.find(act => {
                     if (!act.start) return false;
                     const actEnd = act.end || new Date(act.start.getTime() + 60*60*1000);
@@ -553,8 +575,9 @@
             const totalSlots = blockSlots.length;
             const attendancePct = totalSlots > 0 ? Math.round((attendedCount / totalSlots) * 100) : 0;
             const studentName = document.getElementById('studentName').value.trim() || 'All Students';
+            const primaryUnit = (activities.length > 0 && activities[0].unit !== '—') ? activities[0].unit : '—';
             
-            let html = `<h2>${filename} (Student: ${studentName})</h2>`;
+            let html = `<h2>${filename} (Student: ${studentName}${primaryUnit !== '—' ? ' | Unit: ' + primaryUnit : ''})</h2>`;
             html += `<div class="attendance">📊 Flight Block Attendance Rate<br><strong>${attendancePct}%</strong><br><small>${attendedCount} / ${totalSlots} scheduled block slots fulfilled strictly during block times (${studentAbsentCount} marked "Student Absent" - penalized)</small></div>`;
             html += `<p class="summary">Date range: ${semStart.toLocaleDateString()} – ${semEnd.toLocaleDateString()} | Filtered Student: "${studentName}" | Exclusions: Academic No-Class Days (${noClassDates.length} days)</p>`;
             
@@ -567,6 +590,7 @@
                     <th>Date</th>
                     <th>Scheduled Block</th>
                     <th>Block Time</th>
+                    <th>Unit</th>
                     <th>Block Fulfilled?</th>
                     <th>Activity Type/Subtype</th>
                     <th>Excel Activity Details</th>
@@ -593,6 +617,8 @@
                     }
 
                     const actType = item.activity ? item.activity.activityType : '—';
+                    const actUnit = item.activity ? item.activity.unit : primaryUnit;
+                    const unitBadge = actUnit !== '—' ? `<span class="badge-unit">${actUnit}</span>` : '—';
                     const actDetails = item.activity 
                         ? `${item.activity.description} (${item.activity.start.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})})` 
                         : '—';
@@ -601,6 +627,7 @@
                         <td>${dateStr}</td>
                         <td>${item.slot.blockName}</td>
                         <td>${timeStr}</td>
+                        <td>${unitBadge}</td>
                         <td>${fulfilledLabel}</td>
                         <td><strong>${actType}</strong></td>
                         <td>${actDetails}</td>
@@ -619,6 +646,7 @@
                     <th>#</th>
                     <th>Date</th>
                     <th>Activity Time</th>
+                    <th>Unit</th>
                     <th>Activity Type/Subtype</th>
                     <th>Status</th>
                     <th>Inside Flight Block?</th>
@@ -629,6 +657,7 @@
                     const actDateStr = act.start ? act.start.toLocaleDateString() : '—';
                     const actTimeStr = act.start ? `${act.start.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})} ${act.end ? '– ' + act.end.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : ''}` : '—';
                     const actStatusBadge = act.status === 'Cancelled' ? '<span class="badge-cancelled">Cancelled</span>' : '<span class="badge-completed">Completed</span>';
+                    const unitBadge = act.unit !== '—' ? `<span class="badge-unit">${act.unit}</span>` : '—';
                     
                     const insideBlockBadge = act.isWithinBlockWindow 
                         ? '<span class="badge-in-block">Within Block Time</span>' 
@@ -642,6 +671,7 @@
                         <td>${idx + 1}</td>
                         <td>${actDateStr}</td>
                         <td>${actTimeStr}</td>
+                        <td>${unitBadge}</td>
                         <td><strong>${act.activityType}</strong></td>
                         <td>${actStatusBadge}</td>
                         <td>${insideBlockBadge}</td>
