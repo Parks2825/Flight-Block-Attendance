@@ -194,11 +194,12 @@
             return targetParts.length > 0 && targetParts.every(part => normText.includes(part));
         }
 
+        // Extracts only the Unit portion from a "Name / Unit" string (e.g. "Shaw,A. / FL 1 Local-Dual" -> "FL 1 Local-Dual")
         function extractUnitFromStr(str) {
             if (!str || !str.includes('/')) return '';
             const parts = str.split('/');
             if (parts.length >= 2) {
-                let unit = parts[1].trim();
+                let unit = parts[1].trim(); // Take strictly what is after the slash (strips out Name)
                 if (unit && !unit.toLowerCase().includes('normal') && !unit.toLowerCase().includes('check ride') && !/\d{4}/.test(unit)) {
                     return unit;
                 }
@@ -631,7 +632,7 @@
                     const actType = item.activity ? item.activity.activityType : '—';
                     const actUnit = item.activity ? item.activity.unit : primaryUnit;
 
-                    // If Block Fulfilled = NO (or absent), leave unit blank ('—')
+                    // Displays unit only (stripped of Name) when block is fulfilled
                     const unitBadge = (item.fulfilled && actUnit !== '—') 
                         ? `<span class="badge-unit">${actUnit}</span>` 
                         : '—';
