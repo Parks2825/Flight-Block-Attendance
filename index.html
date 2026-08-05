@@ -33,6 +33,7 @@
         .badge-in-block { background: #0d6efd; color: #fff; padding: 3px 6px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
         .badge-out-block { background: #6c757d; color: #fff; padding: 3px 6px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
         .badge-unit { background: #6f42c1; color: #fff; padding: 3px 6px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
+        .badge-reason { background: #d9534f; color: #fff; padding: 3px 6px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
         .semester-picker-box { background: #eef6ff; border: 1px solid #b6d4fe; padding: 12px; border-radius: 6px; margin-bottom: 15px; }
         
         /* Execution Log Styling */
@@ -198,7 +199,6 @@
             const parts = str.split('/');
             if (parts.length >= 2) {
                 let unit = parts[1].trim();
-                // Filter out non-unit slashes like oral/normal or date strings
                 if (unit && !unit.toLowerCase().includes('normal') && !unit.toLowerCase().includes('check ride') && !/\d{4}/.test(unit)) {
                     return unit;
                 }
@@ -289,7 +289,8 @@
                 cancellationRecords.push({
                     dateKey: formatDateKey(parsedDate),
                     rawDate: dateVal,
-                    isStudentAbsent: ABSENT_REGEX.test(rowText)
+                    isStudentAbsent: ABSENT_REGEX.test(rowText),
+                    rawReason: rowText
                 });
             });
         }
@@ -388,13 +389,11 @@
                 if (!Array.isArray(fields)) continue;
                 let lineStr = fields.map(f => String(f || '').trim()).join(' ');
 
-                // Extract Unit if header row or entry contains "Student: Name / Unit" or "Name / Unit"
                 if (lineStr.includes('/')) {
                     const parsedUnit = extractUnitFromStr(lineStr);
                     if (parsedUnit) currentUnit = parsedUnit;
                 }
 
-                // Check header row for Activity Type / Status
                 if (fields.some(f => /activity\s*type/i.test(String(f || '')))) {
                     fields.forEach((f, idx) => {
                         let colHeader = String(f || '').trim().toLowerCase();
@@ -413,7 +412,6 @@
                 let startStr = null, endStr = null, detectedType = '', status = '', reasonStr = '';
                 let rowUnit = currentUnit;
 
-                // Check specific cell for Student Name / Unit format
                 for (let f of fields) {
                     let strF = String(f || '').trim();
                     if (strF.includes('/')) {
@@ -422,7 +420,6 @@
                     }
                 }
 
-                // If column index for "Activity Type/Subtype" was mapped from headers
                 if (activityTypeColIdx !== -1 && fields[activityTypeColIdx] !== undefined) {
                     let cellVal = String(fields[activityTypeColIdx] || '').trim();
                     if (cellVal && !cellVal.toLowerCase().includes('activity type')) {
@@ -483,7 +480,21 @@
 
                     if (!isStudentAbsent && dateKey) {
                         const match = cancellationRecords.find(c => c.dateKey === dateKey);
-                        if (match && match.isStudentAbsent) isStudentAbsent = true;
+                        if (match && match.isStudentAbsent) {
+                            isStudentAbsent = true;
+                            if (!reasonStr) reasonStr = match.rawReason || 'STUDENT ABSENT';
+                        }
+                    }
+
+                    let formattedReason = '—';
+                    if (status === 'Cancelled' || isCancelled || isStudentAbsent) {
+                        if (isStudentAbsent) {
+                            formattedReason = 'STUDENT ABSENT';
+                        } else if (reasonStr) {
+                            formattedReason = reasonStr;
+                        } else {
+                            formattedReason = 'Cancelled';
+                        }
                     }
 
                     if (start) {
@@ -494,6 +505,7 @@
                             start: start,
                             end: end,
                             status: status || 'Completed',
+                            reason: formattedReason,
                             isStudentAbsent: isStudentAbsent,
                             rawLine: lineStr
                         });
@@ -618,7 +630,12 @@
 
                     const actType = item.activity ? item.activity.activityType : '—';
                     const actUnit = item.activity ? item.activity.unit : primaryUnit;
-                    const unitBadge = actUnit !== '—' ? `<span class="badge-unit">${actUnit}</span>` : '—';
+
+                    // If Block Fulfilled = NO (or absent), leave unit blank ('—')
+                    const unitBadge = (item.fulfilled && actUnit !== '—') 
+                        ? `<span class="badge-unit">${actUnit}</span>` 
+                        : '—';
+
                     const actDetails = item.activity 
                         ? `${item.activity.description} (${item.activity.start.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})})` 
                         : '—';
@@ -649,6 +666,7 @@
                     <th>Unit</th>
                     <th>Activity Type/Subtype</th>
                     <th>Status</th>
+                    <th>Reason</th>
                     <th>Inside Flight Block?</th>
                     <th>Used for Attendance?</th>
                 </tr></thead><tbody>`;
@@ -659,6 +677,10 @@
                     const actStatusBadge = act.status === 'Cancelled' ? '<span class="badge-cancelled">Cancelled</span>' : '<span class="badge-completed">Completed</span>';
                     const unitBadge = act.unit !== '—' ? `<span class="badge-unit">${act.unit}</span>` : '—';
                     
+                    const reasonDisplay = (act.reason && act.reason !== '—')
+                        ? `<span class="badge-reason">${act.reason}</span>`
+                        : '—';
+
                     const insideBlockBadge = act.isWithinBlockWindow 
                         ? '<span class="badge-in-block">Within Block Time</span>' 
                         : '<span class="badge-out-block">Outside Block Time</span>';
@@ -674,6 +696,7 @@
                         <td>${unitBadge}</td>
                         <td><strong>${act.activityType}</strong></td>
                         <td>${actStatusBadge}</td>
+                        <td>${reasonDisplay}</td>
                         <td>${insideBlockBadge}</td>
                         <td><strong>${countedForAttendance}</strong></td>
                     </tr>`;
