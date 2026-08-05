@@ -366,40 +366,85 @@
 
         function parseStudentSchedule(rows, studentName) {
             const activities = [];
+            let activityTypeColIdx = -1;
+            let statusColIdx = -1;
             
+            // Keywords to match common activity type values if header column mapping is missing
+            const activityKeywords = /(flight\s*\/\s*check\s*ride|check\s*ride|dual\s*flight|solo\s*flight|ground\s*school|ground|sim|simulator|stage\s*check|briefing|oral)/i;
+
             for (let fields of rows) {
                 if (!Array.isArray(fields)) continue;
                 let lineStr = fields.map(f => String(f || '').trim()).join(' ');
+
+                // Check if this row is a column header row containing "Activity Type/Subtype"
+                if (fields.some(f => /activity\s*type/i.test(String(f || '')))) {
+                    fields.forEach((f, idx) => {
+                        let colHeader = String(f || '').trim().toLowerCase();
+                        if (colHeader.includes('activity type')) {
+                            activityTypeColIdx = idx;
+                        } else if (colHeader === 'status') {
+                            statusColIdx = idx;
+                        }
+                    });
+                    continue; // Skip processing the header row itself as data
+                }
 
                 if (!matchesStudentName(lineStr, studentName)) continue;
                 if (!/\d{4}/.test(lineStr)) continue;
 
                 let startStr = null, endStr = null, detectedType = '', status = '', reasonStr = '';
 
-                const activityKeywords = /(flight\s*\/\s*check\s*ride|check\s*ride|dual\s*flight|solo\s*flight|ground\s*school|ground|sim|simulator|stage\s*check|briefing|oral)/i;
+                // If column index for "Activity Type/Subtype" was successfully mapped from headers
+                if (activityTypeColIdx !== -1 && fields[activityTypeColIdx] !== undefined) {
+                    let cellVal = String(fields[activityTypeColIdx] || '').trim();
+                    if (cellVal && !cellVal.toLowerCase().includes('activity type')) {
+                        detectedType = cellVal;
+                    }
+                }
 
-                for (let f of fields) {
-                    let strF = String(f || '').trim();
+                if (statusColIdx !== -1 && fields[statusColIdx] !== undefined) {
+                    let cellVal = String(fields[statusColIdx] || '').trim();
+                    if (['Completed','Cancelled','Scheduled'].includes(cellVal)) {
+                        status = cellVal;
+                    }
+                }
+
+                // Field loop for dates and fallbacks
+                for (let idx = 0; idx < fields.length; idx++) {
+                    let strF = String(fields[idx] || '').trim();
                     
+                    // Match date/time strings
                     if (/\d{1,2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{1,2}:\d{1,2}/.test(strF)) {
                         if (!startStr) startStr = strF;
                         else if (!endStr) endStr = strF;
                     }
 
-                    if (['Completed','Cancelled','Scheduled'].includes(strF)) {
+                    // Match Activity Status if not already found via column header
+                    if (!status && ['Completed','Cancelled','Scheduled'].includes(strF)) {
                         status = strF;
                     } 
                     
+                    // Fallback pattern match for Activity Type if column header mapping wasn't found
                     if (!detectedType && activityKeywords.test(strF)) {
-                        detectedType = strF;
-                    }
-
-                    if (!detectedType && strF && !strF.match(/\d{4}/) && strF.length > 2 && !['Completed','Cancelled','Scheduled'].includes(strF) && !strF.toLowerCase().includes('student:')) {
                         detectedType = strF;
                     }
 
                     if (!reasonStr && (ABSENT_REGEX.test(strF) || strF.toLowerCase().includes('reason') || strF.toLowerCase().includes('weather') || strF.toLowerCase().includes('maintenance'))) {
                         reasonStr = strF;
+                    }
+                }
+
+                // Secondary fallback for detectedType if column index wasn't found and keyword didn't match
+                if (!detectedType) {
+                    for (let strF of fields) {
+                        let cleanF = String(strF || '').trim();
+                        if (cleanF && !cleanF.match(/\d{4}/) && cleanF.length > 2 && 
+                            !['Completed','Cancelled','Scheduled'].includes(cleanF) && 
+                            !cleanF.toLowerCase().includes('student:') &&
+                            !cleanF.toLowerCase().includes('activity type')) {
+                            detectedType = cleanF;
+                            break;
+                        }
                     }
                 }
 
@@ -523,7 +568,7 @@
                     <th>Scheduled Block</th>
                     <th>Block Time</th>
                     <th>Block Fulfilled?</th>
-                    <th>Activity Type</th>
+                    <th>Activity Type/Subtype</th>
                     <th>Excel Activity Details</th>
                     <th>Activity Status</th>
                 </tr></thead><tbody>`;
@@ -574,7 +619,7 @@
                     <th>#</th>
                     <th>Date</th>
                     <th>Activity Time</th>
-                    <th>Activity Type</th>
+                    <th>Activity Type/Subtype</th>
                     <th>Status</th>
                     <th>Inside Flight Block?</th>
                     <th>Used for Attendance?</th>
