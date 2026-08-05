@@ -194,18 +194,30 @@
             return targetParts.length > 0 && targetParts.every(part => normText.includes(part));
         }
 
-        // Extracts the full Unit name after the slash (e.g. "Shaw,A. / FL 1 Local-Dual" -> "FL 1 Local-Dual")
+        // Extracts the actual Unit string while filtering out standalone generic words like "Dual" or "Solo"
         function extractUnitFromStr(str) {
-            if (!str || !str.includes('/')) return '';
-            const parts = str.split('/');
-            if (parts.length >= 2) {
-                // Joins everything after the initial slash to capture full unit descriptions
-                let unit = parts.slice(1).join('/').trim(); 
-                if (unit && !unit.toLowerCase().includes('normal') && !unit.toLowerCase().includes('check ride') && !/\d{4}/.test(unit)) {
-                    return unit;
+            if (!str) return '';
+            let rawUnit = '';
+
+            if (str.includes('/')) {
+                const parts = str.split('/');
+                if (parts.length >= 2) {
+                    rawUnit = parts.slice(1).join('/').trim();
                 }
+            } else {
+                rawUnit = str.trim();
             }
-            return '';
+
+            if (!rawUnit) return '';
+
+            // Ignore dates, "normal", "check ride", and pure generic words like "Dual" or "Solo" without a unit code
+            const isGenericWord = /^(dual|solo|local|cross country|xc)$/i.test(rawUnit);
+            const isInvalid = rawUnit.toLowerCase().includes('normal') || 
+                              rawUnit.toLowerCase().includes('check ride') || 
+                              /\d{4}/.test(rawUnit) || 
+                              isGenericWord;
+
+            return isInvalid ? '' : rawUnit;
         }
 
         function isOralNormalEntry(str) {
@@ -383,26 +395,32 @@
             const activities = [];
             let activityTypeColIdx = -1;
             let statusColIdx = -1;
+            let unitColIdx = -1;
             let currentUnit = '—';
             
             const activityKeywords = /(flight\s*\/\s*check\s*ride|check\s*ride|dual\s*flight|solo\s*flight|ground\s*school|ground|sim|simulator|stage\s*check|briefing|oral)/i;
+            const unitCodePattern = /\b(FL\s*\d+|PV\s*\d+|INST\s*\d*|CFI\s*\d*|COMM\s*\d*|MULTI\s*\d*)\b/i;
 
             for (let fields of rows) {
                 if (!Array.isArray(fields)) continue;
                 let lineStr = fields.map(f => String(f || '').trim()).join(' ');
 
+                // Check for block header with Name / Unit
                 if (lineStr.includes('/')) {
                     const parsedUnit = extractUnitFromStr(lineStr);
                     if (parsedUnit) currentUnit = parsedUnit;
                 }
 
-                if (fields.some(f => /activity\s*type/i.test(String(f || '')))) {
+                // Detect column indices from header rows
+                if (fields.some(f => /activity\s*type|unit|course/i.test(String(f || '')))) {
                     fields.forEach((f, idx) => {
                         let colHeader = String(f || '').trim().toLowerCase();
                         if (colHeader.includes('activity type')) {
                             activityTypeColIdx = idx;
                         } else if (colHeader === 'status') {
                             statusColIdx = idx;
+                        } else if (colHeader === 'unit' || colHeader === 'course' || colHeader.includes('unit name')) {
+                            unitColIdx = idx;
                         }
                     });
                     continue;
@@ -414,11 +432,25 @@
                 let startStr = null, endStr = null, detectedType = '', status = '', reasonStr = '';
                 let rowUnit = currentUnit;
 
+                // 1. Explicit unit column check
+                if (unitColIdx !== -1 && fields[unitColIdx] !== undefined) {
+                    let cellVal = String(fields[unitColIdx] || '').trim();
+                    let extracted = extractUnitFromStr(cellVal);
+                    if (extracted) rowUnit = extracted;
+                }
+
+                // 2. Scan all cell fields for explicit Unit codes (e.g. "FL 1 Local-Dual")
                 for (let f of fields) {
                     let strF = String(f || '').trim();
-                    if (strF.includes('/')) {
-                        const u = extractUnitFromStr(strF);
-                        if (u) rowUnit = u;
+                    if (unitCodePattern.test(strF)) {
+                        let extracted = extractUnitFromStr(strF);
+                        if (extracted) {
+                            rowUnit = extracted;
+                            break;
+                        }
+                    } else if (strF.includes('/')) {
+                        let extracted = extractUnitFromStr(strF);
+                        if (extracted) rowUnit = extracted;
                     }
                 }
 
@@ -633,7 +665,6 @@
                     const actType = item.activity ? item.activity.activityType : '—';
                     const actUnit = item.activity ? item.activity.unit : primaryUnit;
 
-                    // Displays full unit name when block is fulfilled
                     const unitBadge = (item.fulfilled && actUnit !== '—') 
                         ? `<span class="badge-unit">${actUnit}</span>` 
                         : '—';
