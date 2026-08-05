@@ -15,6 +15,7 @@
         .overlap { background-color: #ddffdd !important; font-weight: bold; }
         .absent { background-color: #ffcccc !important; font-weight: bold; color: #900000; }
         .no-overlap { background-color: #ffdddd !important; }
+        .excluded { background-color: #e2e3e5 !important; color: #383d41; font-weight: bold; }
         .controls, .block-manager, .history-log-box { margin: 20px 0; padding: 15px; background: white; border: 1px solid #ddd; border-radius: 6px; }
         button { margin: 5px; padding: 8px 16px; cursor: pointer; }
         input[type="date"], input[type="time"], input[type="text"], select { padding: 6px; font-size: 0.95em; }
@@ -34,6 +35,7 @@
         .badge-out-block { background: #6c757d; color: #fff; padding: 3px 6px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
         .badge-unit { background: #6f42c1; color: #fff; padding: 3px 6px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
         .badge-reason { background: #d9534f; color: #fff; padding: 3px 6px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
+        .badge-excluded { background: #6c757d; color: #fff; padding: 3px 6px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
         .semester-picker-box { background: #eef6ff; border: 1px solid #b6d4fe; padding: 12px; border-radius: 6px; margin-bottom: 15px; }
         
         /* Expandable section styling */
@@ -153,6 +155,7 @@
         let runCount = 0;
 
         const ABSENT_REGEX = /(student[\s\-_]*(absent|absence|no[\s\-]*show|cancel|sick|unexcused)|canceled\s+by\s+student|student\s+canceled|medical\s*\(\s*absent\s*\))/i;
+        const STAGE_CHECK_REGEX = /(stage\s*\d*\s*check|stage\s*check|end\s*of\s*course|eoc)/i;
 
         const usuSemesters = {
             spring2026: {
@@ -555,6 +558,7 @@
                             status: status || 'Completed',
                             reason: formattedReason,
                             isStudentAbsent: isStudentAbsent,
+                            isStageCheck: STAGE_CHECK_REGEX.test(detectedType || '') || STAGE_CHECK_REGEX.test(lineStr),
                             rawLine: lineStr
                         });
                     }
@@ -604,14 +608,13 @@
 
         function displayResults(filename, activities, semStart, semEnd) {
             const blockSlots = generateExpectedBlockSlots(semStart, semEnd);
-            let attendedCount = 0;
-            let studentAbsentCount = 0;
 
             activities.forEach(act => {
                 const actEnd = act.end || new Date(act.start.getTime() + 60*60*1000);
                 act.isWithinBlockWindow = blockSlots.some(slot => (act.start < slot.end && actEnd > slot.start));
             });
 
+            // Map block slots to activities and determine raw fulfillment
             const resultsData = blockSlots.map(slot => {
                 const slotDateKey = formatDateKey(slot.date);
                 
@@ -626,24 +629,63 @@
                 const isAbsent = (matchingActivity && matchingActivity.isStudentAbsent) || !!cancellationMatch;
                 const isFulfilled = !!matchingActivity && !isAbsent;
 
-                if (isFulfilled) attendedCount++;
-                if (isAbsent) studentAbsentCount++;
-
-                return { slot: slot, fulfilled: isFulfilled, isAbsent: isAbsent, activity: matchingActivity };
+                return { 
+                    slot: slot, 
+                    fulfilled: isFulfilled, 
+                    isAbsent: isAbsent, 
+                    activity: matchingActivity,
+                    excludedFromAttendance: false,
+                    exclusionReason: ''
+                };
             });
 
-            const totalSlots = blockSlots.length;
-            const attendancePct = totalSlots > 0 ? Math.round((attendedCount / totalSlots) * 100) : 0;
+            // Locate all Stage Check dates in activities
+            const stageCheckDates = activities
+                .filter(act => act.isStageCheck && act.start)
+                .map(act => act.start)
+                .sort((a, b) => a - b);
+
+            // Exclude up to 2 unfulfilled block slots prior to EACH Stage Check
+            let totalExcludedSlots = 0;
+            stageCheckDates.forEach((scDate, idx) => {
+                let unfulfilledFound = 0;
+                for (let i = 0; i < resultsData.length; i++) {
+                    const item = resultsData[i];
+                    if (item.slot.start < scDate) {
+                        if (!item.fulfilled && !item.excludedFromAttendance) {
+                            item.excludedFromAttendance = true;
+                            item.exclusionReason = `Prior to Stage Check #${idx + 1} (${scDate.toLocaleDateString()})`;
+                            unfulfilledFound++;
+                            totalExcludedSlots++;
+                            if (unfulfilledFound === 2) break;
+                        }
+                    }
+                }
+            });
+
+            let attendedCount = 0;
+            let studentAbsentCount = 0;
+            let effectiveTotalSlots = 0;
+
+            resultsData.forEach(item => {
+                if (!item.excludedFromAttendance) {
+                    effectiveTotalSlots++;
+                    if (item.fulfilled) attendedCount++;
+                    if (item.isAbsent) studentAbsentCount++;
+                }
+            });
+
+            const attendancePct = effectiveTotalSlots > 0 ? Math.round((attendedCount / effectiveTotalSlots) * 100) : 0;
             const studentName = document.getElementById('studentName').value.trim() || 'All Students';
             const primaryUnit = (activities.length > 0 && activities[0].unit !== '—') ? activities[0].unit : '—';
             
             let html = `<h2>${filename} (Student: ${studentName}${primaryUnit !== '—' ? ' | Unit: ' + primaryUnit : ''})</h2>`;
-            html += `<div class="attendance">📊 Flight Block Attendance Rate<br><strong>${attendancePct}%</strong><br><small>${attendedCount} / ${totalSlots} scheduled block slots fulfilled strictly during block times (${studentAbsentCount} marked "Student Absent" - penalized)</small></div>`;
-            html += `<p class="summary">Date range: ${semStart.toLocaleDateString()} – ${semEnd.toLocaleDateString()} | Filtered Student: "${studentName}" | Exclusions: Academic No-Class Days (${noClassDates.length} days)</p>`;
+            html += `<div class="attendance">📊 Flight Block Attendance Rate<br><strong>${attendancePct}%</strong><br><small>${attendedCount} / ${effectiveTotalSlots} effective block slots fulfilled (${totalExcludedSlots} unfulfilled slots excluded prior to Stage Checks)</small></div>`;
+            html += `<p class="summary">Date range: ${semStart.toLocaleDateString()} – ${semEnd.toLocaleDateString()} | Filtered Student: "${studentName}" | Stage Checks Detected: ${stageCheckDates.length} | Excluded Slots: ${totalExcludedSlots}</p>`;
             
             // Section 1: Flight Block Attendance Table
             html += `<h3>📅 Flight Block Attendance Comparison</h3>`;
-            if (totalSlots === 0) {
+            if (blockSlots.length === 0) {
                 html += `<p>No scheduled flight blocks found in this date range.</p>`;
             } else {
                 html += `<table><thead><tr>
@@ -665,7 +707,11 @@
                     let fulfilledLabel = '❌ NO';
                     let statusBadge = '—';
 
-                    if (item.isAbsent) {
+                    if (item.excludedFromAttendance) {
+                        rowClass = 'excluded';
+                        fulfilledLabel = `⚠️ EXCLUDED (${item.exclusionReason})`;
+                        statusBadge = '<span class="badge-excluded">Excluded</span>';
+                    } else if (item.isAbsent) {
                         rowClass = 'absent';
                         fulfilledLabel = '❌ NO (STUDENT ABSENT)';
                         statusBadge = '<span class="badge-cancelled">Cancelled</span>';
@@ -743,7 +789,7 @@
                         <td>${actDateStr}</td>
                         <td>${actTimeStr}</td>
                         <td>${unitBadge}</td>
-                        <td><strong>${act.activityType}</strong></td>
+                        <td><strong>${act.activityType}${act.isStageCheck ? ' 🚩' : ''}</strong></td>
                         <td>${actStatusBadge}</td>
                         <td>${reasonDisplay}</td>
                         <td>${insideBlockBadge}</td>
@@ -762,8 +808,9 @@
                 filename: filename,
                 attendancePct: attendancePct,
                 fulfilledCount: attendedCount,
-                totalSlots: totalSlots,
+                totalSlots: effectiveTotalSlots,
                 studentAbsentCount: studentAbsentCount,
+                excludedSlots: totalExcludedSlots,
                 semStart: semStart.toLocaleDateString(),
                 semEnd: semEnd.toLocaleDateString()
             });
@@ -782,6 +829,7 @@
                 attendancePct: `${logData.attendancePct}%`,
                 fulfilled: `${logData.fulfilledCount}/${logData.totalSlots}`,
                 studentAbsences: logData.studentAbsentCount,
+                excludedSlots: logData.excludedSlots,
                 filename: logData.filename,
                 dateRange: `${logData.semStart} to ${logData.semEnd}`
             };
@@ -795,8 +843,8 @@
                     ⏱ ${record.timestamp} | Student: ${record.studentName} | Attendance: <span class="log-rate">${record.attendancePct}</span>
                 </div><br>
                 <strong>File:</strong> ${record.filename}<br>
-                <strong>Stats:</strong> ${record.fulfilled} fulfilled blocks (${record.studentAbsences} penalized student absences)<br>
-                <strong>Date Range:</strong> ${record.dateRange} | <strong>Exclusions:</strong> Academic calendar no-class days only
+                <strong>Stats:</strong> ${record.fulfilled} fulfilled blocks (${record.studentAbsences} student absences, ${record.excludedSlots} excluded prior to Stage Checks)<br>
+                <strong>Date Range:</strong> ${record.dateRange} | <strong>Exclusions:</strong> Academic calendar no-class days & Stage Check exceptions
             `;
 
             historyContainer.prepend(entry);
@@ -805,7 +853,7 @@
         function exportLogToCSV() {
             if (executionLogData.length === 0) return alert('No execution logs recorded yet to export.');
 
-            const headers = ["Run Number", "Timestamp", "Student Name", "Attendance Rate", "Fulfilled Blocks", "Student Absences", "File Name", "Date Range"];
+            const headers = ["Run Number", "Timestamp", "Student Name", "Attendance Rate", "Fulfilled Blocks", "Student Absences", "Stage Check Exclusions", "File Name", "Date Range"];
             const rows = executionLogData.map(log => [
                 log.runNumber,
                 `"${log.timestamp}"`,
@@ -813,6 +861,7 @@
                 `"${log.attendancePct}"`,
                 `"${log.fulfilled}"`,
                 log.studentAbsences,
+                log.excludedSlots,
                 `"${log.filename}"`,
                 `"${log.dateRange}"`
             ]);
