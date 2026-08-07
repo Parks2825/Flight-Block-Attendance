@@ -159,6 +159,7 @@
 
         const ABSENT_REGEX = /(student[\s\-_]*(absent|absence|no[\s\-]*show|cancel|sick|unexcused)|canceled\s+by\s+student|student\s+canceled|medical\s*\(\s*absent\s*\))/i;
         const STAGE_CHECK_REGEX = /(stage\s*\d*\s*check|stage\s*check|end\s*of\s*course|eoc)/i;
+        const NIGHT_REGEX = /night/i;
 
         const usuSemesters = {
             spring2026: {
@@ -552,6 +553,7 @@
                     }
 
                     if (start) {
+                        const combinedDesc = (detectedType || '') + ' ' + lineStr;
                         activities.push({
                             description: detectedType || 'Scheduled Activity',
                             activityType: detectedType || 'Flight / General',
@@ -562,6 +564,7 @@
                             reason: formattedReason,
                             isStudentAbsent: isStudentAbsent,
                             isStageCheck: STAGE_CHECK_REGEX.test(detectedType || '') || STAGE_CHECK_REGEX.test(lineStr),
+                            isNightActivity: NIGHT_REGEX.test(combinedDesc),
                             rawLine: lineStr
                         });
                     }
@@ -642,16 +645,23 @@
                 };
             });
 
-            // Find all active (non-cancelled) Stage Check dates
+            // Find active (non-cancelled) Stage Check dates
             const stageCheckDates = activities
                 .filter(act => act.isStageCheck && act.start && act.status !== 'Cancelled')
                 .map(act => act.start)
                 .sort((a, b) => a - b);
 
-            // Working backward from each active Stage Check date, exclude up to 'blocksToExcludeCount' unfulfilled block slots
+            // Find active (non-cancelled) Night Activity dates
+            const nightActivityDates = activities
+                .filter(act => act.isNightActivity && act.start && act.status !== 'Cancelled')
+                .map(act => act.start)
+                .sort((a, b) => a - b);
+
             let totalExcludedSlots = 0;
+
+            // 1. Working backward from each active Stage Check date, exclude unfulfilled block slots
             if (blocksToExcludeCount > 0) {
-                stageCheckDates.forEach((scDate, idx) => {
+                stageCheckDates.forEach((scDate) => {
                     let countForThisCheck = 0;
                     for (let i = resultsData.length - 1; i >= 0; i--) {
                         const item = resultsData[i];
@@ -667,6 +677,23 @@
                     }
                 });
             }
+
+            // 2. Working backward from each active Night Activity date, exclude exactly 1 unfulfilled block slot
+            nightActivityDates.forEach((nightDate) => {
+                let countForThisNight = 0;
+                for (let i = resultsData.length - 1; i >= 0; i--) {
+                    const item = resultsData[i];
+                    if (item.slot.start < nightDate) {
+                        if (!item.fulfilled && !item.excludedFromAttendance) {
+                            item.excludedFromAttendance = true;
+                            item.exclusionReason = `Prior to Night Activity (${nightDate.toLocaleDateString()})`;
+                            countForThisNight++;
+                            totalExcludedSlots++;
+                            if (countForThisNight === 1) break;
+                        }
+                    }
+                }
+            });
 
             let attendedCount = 0;
             let studentAbsentCount = 0;
@@ -685,8 +712,8 @@
             const primaryUnit = (activities.length > 0 && activities[0].unit !== '—') ? activities[0].unit : '—';
             
             let html = `<h2>${filename} (Student: ${studentName}${primaryUnit !== '—' ? ' | Unit: ' + primaryUnit : ''})</h2>`;
-            html += `<div class="attendance">📊 Flight Block Attendance Rate<br><strong>${attendancePct}%</strong><br><small>${attendedCount} / ${effectiveTotalSlots} effective block slots fulfilled (${totalExcludedSlots} unfulfilled slots excluded prior to Stage Checks, limit: ${blocksToExcludeCount} per check)</small></div>`;
-            html += `<p class="summary">Date range: ${semStart.toLocaleDateString()} – ${semEnd.toLocaleDateString()} | Filtered Student: "${studentName}" | Active Stage Checks Detected: ${stageCheckDates.length} | Excluded Slots: ${totalExcludedSlots}</p>`;
+            html += `<div class="attendance">📊 Flight Block Attendance Rate<br><strong>${attendancePct}%</strong><br><small>${attendedCount} / ${effectiveTotalSlots} effective block slots fulfilled (${totalExcludedSlots} unfulfilled slots excluded for Stage/Night configurations)</small></div>`;
+            html += `<p class="summary">Date range: ${semStart.toLocaleDateString()} – ${semEnd.toLocaleDateString()} | Filtered Student: "${studentName}" | Active Stage Checks: ${stageCheckDates.length} | Active Night Activities: ${nightActivityDates.length} | Total Excluded Slots: ${totalExcludedSlots}</p>`;
             
             // Section 1: Flight Block Attendance Table
             html += `<h3>📅 Flight Block Attendance Comparison</h3>`;
@@ -789,12 +816,16 @@
                         ? '✅ YES' 
                         : '❌ NO';
 
+                    let indicators = '';
+                    if (act.isStageCheck) indicators += ' 🚩';
+                    if (act.isNightActivity) indicators += ' 🌙';
+
                     html += `<tr>
                         <td>${idx + 1}</td>
                         <td>${actDateStr}</td>
                         <td>${actTimeStr}</td>
                         <td>${unitBadge}</td>
-                        <td><strong>${act.activityType}${act.isStageCheck ? ' 🚩' : ''}</strong></td>
+                        <td><strong>${act.activityType}${indicators}</strong></td>
                         <td>${actStatusBadge}</td>
                         <td>${reasonDisplay}</td>
                         <td>${insideBlockBadge}</td>
@@ -848,8 +879,8 @@
                     ⏱ ${record.timestamp} | Student: ${record.studentName} | Attendance: <span class="log-rate">${record.attendancePct}</span>
                 </div><br>
                 <strong>File:</strong> ${record.filename}<br>
-                <strong>Stats:</strong> ${record.fulfilled} fulfilled blocks (${record.studentAbsences} student absences, ${record.excludedSlots} excluded prior to Stage Checks)<br>
-                <strong>Date Range:</strong> ${record.dateRange} | <strong>Exclusions:</strong> Academic calendar no-class days & Stage Check exceptions
+                <strong>Stats:</strong> ${record.fulfilled} fulfilled blocks (${record.studentAbsences} student absences, ${record.excludedSlots} excluded variants)<br>
+                <strong>Date Range:</strong> ${record.dateRange} | <strong>Exclusions:</strong> Academic calendar, Stage Check, & Night operations exceptions
             `;
 
             historyContainer.prepend(entry);
@@ -858,7 +889,7 @@
         function exportLogToCSV() {
             if (executionLogData.length === 0) return alert('No execution logs recorded yet to export.');
 
-            const headers = ["Run Number", "Timestamp", "Student Name", "Attendance Rate", "Fulfilled Blocks", "Student Absences", "Stage Check Exclusions", "File Name", "Date Range"];
+            const headers = ["Run Number", "Timestamp", "Student Name", "Attendance Rate", "Fulfilled Blocks", "Student Absences", "Total Exclusions", "File Name", "Date Range"];
             const rows = executionLogData.map(log => [
                 log.runNumber,
                 `"${log.timestamp}"`,
